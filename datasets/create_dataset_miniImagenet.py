@@ -69,7 +69,7 @@ def main(data_dir, output_dir):
         features = features[permutation]
         targets = targets[permutation]
         np.savez(
-            os.path.join(output_dir, 'mini-imagenet-{}.npz'.format(split)),
+            os.path.join(output_dir, 'few-shot-{}.npz'.format(split)),
             features=features, targets=targets)
 
 

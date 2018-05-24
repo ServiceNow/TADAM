@@ -12,7 +12,7 @@ from collections import defaultdict
 def _load_mini_imagenet(data_dir, split):
     """Load mini-imagenet from numpy's npz file format."""
     _split_tag = {'sources': 'train', 'target_val': 'val', 'target_tst': 'test'}[split]
-    dataset_path = os.path.join(data_dir, 'mini-imagenet-{}.npz'.format(_split_tag))
+    dataset_path = os.path.join(data_dir, 'few-shot-{}.npz'.format(_split_tag))
     logging.info("Loading mini-imagenet...")
     data = np.load(dataset_path)
     fields = data['features'], data['targets']

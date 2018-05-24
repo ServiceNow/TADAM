@@ -76,7 +76,7 @@ def main(data_dir, output_dir):
         targets = split_fine_labels[permutation]
         pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
         np.savez(
-            os.path.join(output_dir, 'mini-imagenet-{}.npz'.format(split_name)),
+            os.path.join(output_dir, 'few-shot-{}.npz'.format(split_name)),
             features=features, targets=targets)
 
 
@@ -87,7 +87,7 @@ if __name__ == '__main__':
         default=os.path.join(os.sep, 'mnt', 'datasets', 'public', 'cifar100', 'raw-data'),
         help='Path to the raw data')
     parser.add_argument(
-        '--output-dir', type=str, default=os.path.join(os.sep, 'mnt', 'datasets', 'public', 'cifar100', 'few-shot'),
+        '--output-dir', type=str, default=os.path.join(os.sep, 'mnt', 'datasets', 'public', 'cifar100'),
         help='Output directory')
 
     args = parser.parse_args()
