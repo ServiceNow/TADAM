@@ -123,7 +123,7 @@ def get_arguments():
     parser.add_argument('--num_filters', type=int, default=64)
     parser.add_argument('--num_units_in_block', type=int, default=3)
     parser.add_argument('--num_blocks', type=int, default=4)
-    parser.add_argument('--num_max_pools', type=int, default=4)
+    parser.add_argument('--num_max_pools', type=int, default=3)
     parser.add_argument('--block_size_growth', type=float, default=2.0)
     parser.add_argument('--activation', type=str, default='swish-1', choices=['relu', 'selu', 'swish-1'])
 
@@ -138,7 +138,6 @@ def get_arguments():
     parser.add_argument('--num_attention_models', type=int, default=6)
     parser.add_argument('--num_attention_layers', type=int, default=2)
     parser.add_argument('--attention_fusion', type=str, default='sum', choices=['sum', 'highway', 'weighted'])
-    parser.add_argument('--leaky_alpha', type=float, default=0.1)
 
     parser.add_argument('--feature_extractor', type=str, default='simple_res_net',
                         choices=['simple_conv_net', 'simple_res_net', 'res_net', 'dense_net', 'residense_net', 'res_net_34'], help='Which feature extractor to use')
@@ -148,9 +147,9 @@ def get_arguments():
     parser.add_argument('--feat_extract_pretrain_offset', type=int, default=15000)
     parser.add_argument('--feat_extract_pretrain_decay_rate', type=float, default=0.9, help='rate at which 64 way task selection probability decays in multitask mode')
     parser.add_argument('--feat_extract_pretrain_decay_n', type=int, default=20, help='number of times 64 way task selection probability decays in multitask mode')
-    parser.add_argument('--feat_extract_pretrain_lr_decay_rate', type=float, default=5.0,
+    parser.add_argument('--feat_extract_pretrain_lr_decay_rate', type=float, default=10.0,
                         help='rate at which 64 way task learning rate decays')
-    parser.add_argument('--feat_extract_pretrain_lr_decay_n', type=float, default=1.6,
+    parser.add_argument('--feat_extract_pretrain_lr_decay_n', type=float, default=2.0,
                         help='number of times 64 way task learning rate decays')
     # Multitask few-shot training auxiliary task
     parser.add_argument('--aux_num_classes_test', type=int, default=10, help='Number of classes in the test phase, auxiliary task')
@@ -175,16 +174,16 @@ def get_arguments():
     parser.add_argument('--task_encoder', type=str, default='class_mean', choices=['talkthrough', 'class_mean', 'label_embed', 'self_attention'])
     parser.add_argument('--num_self_attention_splits', type=int, default=1)
 
-    parser.add_argument('--metric_multiplier_init', type=float, default=15.0, help='multiplier of cosine metric')
+    parser.add_argument('--metric_multiplier_init', type=float, default=10.0, help='multiplier of cosine metric')
     parser.add_argument('--metric_multiplier_trainable', type=bool, default=False, help='multiplier of cosine metric trainability')
-    parser.add_argument('--polynomial_metric_order', type=int, default=2)
+    parser.add_argument('--polynomial_metric_order', type=int, default=1)
     parser.add_argument('--perceptron_metric_filters', type=int, default=64)
     parser.add_argument('--perceptron_metric_layers', type=int, default=2)
 
     parser.add_argument('--cbn_premultiplier', type=str, default='var', choices=['var', 'projection'])
-    parser.add_argument('--cbn_num_layers', type=int, default=2)
-    parser.add_argument('--cbn_per_block', type=bool, default=True)
-    parser.add_argument('--cbn_per_network', type=bool, default=True)
+    parser.add_argument('--cbn_num_layers', type=int, default=3)
+    parser.add_argument('--cbn_per_block', type=bool, default=False)
+    parser.add_argument('--cbn_per_network', type=bool, default=False)
     parser.add_argument('--cbn_after_shortcut', type=bool, default=False)
 
     parser.add_argument('--densenet_depth', type=int, default=40)

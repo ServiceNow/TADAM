@@ -56,7 +56,6 @@ if __name__ == "__main__":
         dropout=1.0,
         class_embed_size=None,  # 32
         attention_num_filters=128,  # [64, 128]
-        leaky_alpha=0.1,  # Not implemented yet
         task_encoder='class_mean',  # ['talkthrough', 'class_mean', 'label_embed', 'self_attention']
         num_self_attention_splits=4,
         weights_initializer_factor=0.1,
