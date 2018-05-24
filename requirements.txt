@@ -1,0 +1,6 @@
+# pip
+ipython
+numpy
+scipy
+tensorflow==1.4.1
+pandas

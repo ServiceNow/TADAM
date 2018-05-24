@@ -1,0 +1,652 @@
+\documentclass{article}
+
+% if you need to pass options to natbib, use, \emph{e.g.}:
+% \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading nips_2018
+
+% ready for submission
+%\usepackage{nips_2018}
+
+% to compile a preprint version, \emph{e.g.}, for submission to arXiv, add
+% add the [preprint] option:
+% \usepackage[preprint]{nips_2018}
+
+% to compile a camera-ready version, add the [final] option, \emph{e.g.}:
+% \usepackage[final]{nips_2018}
+
+% to avoid loading the natbib package, add option nonatbib:
+\usepackage[nonatbib,preprint]{nips_2018}
+
+
+\usepackage[square, numbers]{natbib}
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb} % AMS macros for math
+\usepackage{appendix}
+\usepackage[pdftex]{graphicx}
+\usepackage{amsthm}
+\usepackage{subcaption}
+\usepackage{bm}
+\usepackage{mathtools}
+
+
+\graphicspath{{fig/}}
+
+
+\newcommand{\todo}[1]{}
+\renewcommand{\todo}[1]{{\color{red} TODO: {#1}}}
+\renewcommand{\vec}[1]{\mathbf{#1}}
+\newcommand{\norm}[2]{\left\lVert#1\right\rVert_{#2}}
+\newcommand{\examples}[1]{\mathcal{S}_{#1}}
+\newcommand{\query}[1]{\mathcal{Q}_{#1}}
+\newcommand{\querysize}{q}
+\newcommand{\featuresize}{{D_{\vec{z}}}}
+\newcommand{\imagesize}{{D_{\vec{x}}}}
+\newcommand{\phisize}{{D_{\phi}}}
+\newcommand{\metric}{d}
+
+\newcommand{\tocite}[1]{[{\color{red} cite #1}]}
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\softmax}{softmax}
+\DeclarePairedDelimiter\floor{\lfloor}{\rfloor}
+
+\newtheorem{lemma}{Lemma}
+
+
+% \title{Improved few-shot learning with task conditioning and metric scaling}
+\title{TADAM: Task dependent adaptive metric for improved few-shot learning}
+% \title{TACOMA: Task conditioned metric adaptation}
+
+% TODO: Shift legend in plots
+
+% The \author macro works with any number of authors. There are two
+% commands used to separate the names and addresses of multiple
+% authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to
+% break the lines. Using \AND forces a line break at that point. So,
+% if LaTeX puts 3 of 4 authors names on the first line, and the last
+% on the second line, try using \AND instead of \And before the third
+% author name.
+
+
+\author{
+    Boris N. Oreshkin \\
+    Element AI \\
+    \texttt{boris@elementai.com} \\
+    \And
+    Alexandre Lacoste \\
+    Element AI \\
+    \texttt{allac@elementai.com} \\
+    \And
+    Pau Rodriguez
+    \thanks{Computer Vision Center, UAB} \\
+    Element AI \\
+    \texttt{pau.rodriguez@elementai.com}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Few-shot learning has become essential for producing models that generalize from few examples. In this work, we identify that metric scaling and metric task conditioning are important to improve the performance of few-shot algorithms. Our analysis reveals that simple metric scaling completely changes the nature of few-shot algorithm parameter updates. Metric scaling provides improvements up to 14\% in accuracy for certain metrics on the mini-Imagenet 5-way 5-shot classification task. We further propose a simple and effective way of conditioning a learner on the task sample set, resulting in learning a task-dependent metric space. Moreover, we propose and empirically test a practical end-to-end optimization procedure based on auxiliary task co-training to learn a task-dependent metric space. The resulting few-shot learning model based on the task-dependent scaled metric achieves state of the art on mini-Imagenet. We confirm these results on another few-shot dataset that we introduce in this paper based on CIFAR100.
+\end{abstract}
+
+\section{Introduction}
+Humans can learn to identify new categories from few examples, even from a single one \citep{carey1978acquiring}. Few-shot learning has recently attracted significant attention  \citep{ravi2016optimization,vinyals2016matching, snell2017prototypical,sung2018learning,He2016Deep,Santoro16metalearning,munkhdalai2018rapid,mishra2018simle}, as it aims to produce models that can generalize from small amounts of labeled data. In the few-shot setting, one aims to learn a model that extracts information from a set of labeled examples (\emph{sample} set) to label instances from a set of unlabeled examples (\emph{query} set). Recently, this problem has been reframed into the meta-learning framework \cite{ravi2016optimization}, \emph{i.e.} the model is trained so that given a \emph{sample} set or task, produces a classifier for that specific task. Thus, the model is exposed to different tasks (or episodes) during the training phase, and it is evaluated on a non-overlapping set of new tasks \citep{vinyals2016matching}.
+
+Two recent approaches have proven to be  influential in the few-shot learning domain: \emph{Matching Networks} \citep{vinyals2016matching}, and \emph{Prototypical Networks} \citep{snell2017prototypical}. In both approaches, the \emph{sample} set and the \emph{query} set are embedded with a neural network, and nearest neighbor classification is used given a metric in the embedded space. Since then, the problem of learning the most suitable metric for few-shot learning has been central to the field~\citep{vinyals2016matching, snell2017prototypical,sung2018learning,munkhdalai2018rapid,mishra2018simle}. Learning a metric space in the context of few-shot learning generally implies identifying a suitable similarity measure (e.g. cosine or Euclidean), a feature extractor (or more generally a learner) mapping raw inputs onto similarity space (\emph{e.g.} convolutional stack for images or LSTM stack for text), a cost function to drive the parameter updates, and a training scheme (often episodic). Although the individual components in this list have been explored, the relationships between them have not received considerable attention.   
+
+In the current work we aim to close this gap. We show that taking into account the interaction between the identified components leads to significant improvements in the few-shot generalization. In particular, we show that a non-trivial interaction between the similarity metric and the cost function can be exploited to improve the performance of a given similarity metric via scaling. Using this mechanism we close more than the 10\% gap in performance between the cosine similarity and the Euclidean distance reported in~\citep{snell2017prototypical}. Even more importantly, we extend the very notion of the metric space by making it task dependent via conditioning the feature extractor on the specific task. However, learning such a space is in general more challenging than learning a static one. Hence, we find a solution in exploiting the interaction between the conditioned feature extractor and the training procedure based on auxiliary co-training on a simpler task. Our proposed few-shot learning architecture based on task-dependent scaled metric achieves superior performance on two challenging few-shot image classification datasets. It shows up to 8.5\% absolute accuracy improvement over the baseline (\citet{snell2017prototypical}), and 4.8\% over the state-of-the-art~\citep{munkhdalai2018rapid} on the 5-shot, 5-way mini-Imagenet classification task, reaching 76.7\% of accuracy, which is the best-reported accuracy on this dataset.
+
+
+\subsection{Background} \label{ssec:definitions}
+
+We consider the episodic $K$-shot, $C$-way classification scenario. In this scenario, a learning algorithm is provided with a \emph{sample} set $\examples{} = \{(\vec{x}_i, y_i) \}_{i=1}^{KC}$ consisting of $K$ examples for each of $C$ classes and a \emph{query} set $\query{} = \{(\vec{x}_i, y_i) \}_{i=1}^{\querysize}$ for a task to be solved in a given episode. The \emph{sample} set provides the task information via observations $\vec{x}_i \in \mathbb{R}^\imagesize$ and their respective class labels $y_i \in \{1, \ldots, C\}$. Given the information in the \emph{sample} set $\examples{}$, the learning algorithm is able to classify individual samples from the \emph{query} set $\query{}$. Next, we define a similarity measure $d : \mathbb{R}^{2 \featuresize} \rightarrow \mathbb{R}$. Note that $d$ does not have to satisfy the classical metric properties (non-negativity, symmetry, subadditivity) to be useful in the context of few-shot learning. The dimensionality of metric input, $\featuresize$, will most naturally be related to the size of embedding created by a (deep) feature extractor $f_{\phi} : \mathbb{R}^{\imagesize} \rightarrow \mathbb{R}^{\featuresize}$, parameterized by $\phi$, mapping $\vec{x}$ to $\vec{z}$, a representation space of dimension $\featuresize$. Here $\phi \in \mathbb{R}^{\phisize}$ is a list of parameters defining $f_{\phi}$, \emph{e.g.} a list of weights in a neural network. The set of representations $(f_{\phi}(\vec{x}_i), y_i), \forall (\vec{x}_i, y_i) \in \examples{}$ can directly be used to solve the few-shot learning classification problem by association (\emph{c.f.} Matching networks~\citep{vinyals2016matching}). Instead, \citet{snell2017prototypical} proposed to introduce inductive bias in the model by defining a unique feature representation $\vec{c}_k$ for each class $k$ as the mean over embeddings belonging to $\examples{k}$: $\vec{c}_k = \frac{1}{K} \sum_{\vec{x}_i \in \examples{k}} f_{\phi}(\vec{x}_i)$. To learn $\phi$, they minimize $-\log p_\phi (y=k | \vec{x})$ using the softmax over prototypes $\mathbf{c}_k$ to define the likelihood: $p_\phi (y=k | \vec{x}) = \softmax(-d(f_{\phi}(\vec{x}), \mathbf{c}_k))$.
+
+
+\subsection{Summary of contributions} \label{ssec:summary_of_contributions}
+
+% We provide a thorough analysis of the state of the art for few-shot learning and demonstrate that current models can be significantly enhanced with: 
+
+\textbf{Metric Scaling:} We show that learning a scaling factor $\alpha$ after applying the distance function $d$ helps the softmax operate in the proper regime. We accompany this result with a theoretical analysis to help understand the influence of this factor. Finally, we empirically demonstrate that the choice of the distance function $d$ has much less influence when the proper scaling is used.
+
+\textbf{Task Conditioning:} We use a task encoding network to extract a task representation based on the task's \emph{sample} set. This is used to influence the behavior of the feature extractor through FILM \citep{perez2017film}.
+
+\textbf{Auxiliary task co-training:} We show that co-training the feature extraction on a conventional supervised classification task reduces training complexity and provides better generalization.
+
+%\textbf{More capacity and better training:} We also incorporate some of the states of the art image classification techniques such as residual networks \citet{He2016Deep}, Stochastic Gradient Descent (SGD) with momentum \tocite{} and proper learning rate annealing \tocite{}.
+
+%As a result, our improved model generalizes better than existing meta-learning algorithms, reaching an 8.5\% absolute accuracy improvement over the baseline (\citet{snell2017prototypical}), and 4.8\% over the state of the art on the 5-shot, 5-way mini-Imagenet classification task.
+
+\subsection{Related work} \label{ssec:related_work}
+Three main approaches for solving the few-shot classification problem can be identified in the literature. The first one, which is used in this work, is the meta-learning approach, \emph{i.e.} learning a model that, given a task (set of labeled data), produces a classifier that generalizes across all tasks \citep{thrun1998lifelong, schmidhuber1997shifting}. This is the case of Matching Networks \citep{vinyals2016matching}, which use a Recurrent Neural Network (RNN) to accumulate information about a given task. In MAML \citep{finn2017model}, the parameters of an arbitrary learner model are optimized so that they can be quickly adapted to a particular task. In ``Optimization as a model'' \citep{ravi2016optimization}, a learner model is adapted to a new episodic task by a recurrent meta-learner producing efficient parameter updates. A more general approach was proposed by~\citet{Santoro16metalearning}, where the meta-learner is trained to represent entries from a \emph{sample} set in an external memory. Similarly, adaResNet \citep{munkhdalai2018rapid} uses memory and the \emph{sample} set to produce shift coefficients on the neuron activations of the \emph{query} set classifier.
+Many recent approaches focus on learning a metric on the episodic feature space. Prototypical networks \citep{snell2017prototypical} use a feed-forward neural network to embed the task examples and perform nearest neighbor classification with the class centroids. The relation network approach by~\citet{sung2018learning} introduces a separate learnable similarity metric. SNAIL \citep{mishra2018simle} uses an explicit attention mechanism applicable both to supervised and to the sequence based reinforcement learning tasks. It has also been shown that these approaches benefit from leveraging unlabeled data. In \citet{ren2018meta}, unlabeled data are used to refine the class prototypes, and in \citet{yuxiongwang2017imaginary}, Prototypical Matching Networks are used to learn from episodes augmented with generated data.
+
+A second family of approaches aim to maximize the distance between examples from different classes \citep{koch2015siamese}. Similarly, in \citep{hadsell2006dimensionality}, a contrastive loss function is used to learn to project data onto a manifold that is invariant to deformations in the input space. In the same vein, in \citep{fink2005object, schroff2015facenet, taigman2015web}, triplet loss is used for learning a representation for few-shot learning. The attentive recurrent comparators \citep{shyam2017attentive} go beyond classical siamese approaches and use a recurrent architecture to learn to perform pairwise comparisons and predict if the compared examples belong to the same class.
+
+The third class of approaches relies on Bayesian modeling of the prior distribution of the different categories like in \citet{fei2006one, Bauer2017discriminative}, or \citet{lake2013one, edwards2016towards, Lacoste2018deepprior} who rely on hierarchical Bayesian modeling.
+
+
+The rest of the paper is organized as follows. Section~\ref{sec:model} describes our contributions in detail. Section~\ref{sec:experiments} highlights the importance of each contribution via an ablation study. The study is performed over two different benchmarks in the regime of 1-shot, 5-shot and 10-shot learning to verify if conclusions hold across different setups. Finally, Section~\ref{sec:conclusions} concludes the paper and outlines future research directions.
+
+\section{Model Description}\label{sec:model}
+
+\subsection{Metric Scaling}\label{ssec:theory_metric_scaling}
+
+\citet{snell2017prototypical} found that the Euclidean distance outperformed the cosine distance used in \citet{vinyals2016matching}. We observed that the improvement could be directly attributed to the interaction of the different scaling of the metrics with the softmax. Moreover, the dimensionality of the output has a direct impact on the output scale even for the Euclidean distance \citep{vaswani2017attention}. Namely, assuming\footnote{Neural network initialization and batch norm encourages this regime.} that $\vec{z} \sim \mathcal{N}(0, I)$, $\E_z[\lVert \vec{z} \rVert_2^2] = D_f$. If $D_f$ is large, the network may have to work outside of its optimal regime to be able to scale down the feature representation. Hence, we propose to scale the distance metric by a learnable temperature, $\alpha$, $p_{\phi,\alpha}(y=k|\vec{x})=\softmax(-\alpha d(\vec{z}, \mathbf{c}_k))$, to enable the model to learn the best regime for each similarity metric, thus improving the performances of all metrics. To further understand the role of $\alpha$, we analyze the class-wise cross-entropy loss function, $J_{k}(\phi,\alpha)$,\footnote{Note that the total loss is simply $J(\phi,\alpha) = \sum_{k} J_{k}(\phi,\alpha)$}
+\begin{align} \label{eqn:softmax_with_alpha_cost_by_class}
+    J_{k}(\phi,\alpha) = \sum_{\vec{x}_{i} \in \query{k}} \Big[ \alpha \metric(f_{\phi}(\vec{x}_{i}), \vec{c}_k)  + \log \sum_{j} \exp(-\alpha \metric(f_{\phi}(\vec{x}_i), \vec{c}_j)) \Big],
+\end{align}
+where $\query{k} = \{ (\vec{x}_i, y_i) \in \query{} : y_i = k \}$ is the \emph{query} set corresponding to the class $k$. Its gradient, which is used to update parameters $\phi$ is given by the following expression:
+\begin{align} \label{eqn:softmax_with_alpha_total_derivative}
+    \frac{\partial}{\partial\phi}J_k(\phi,\alpha) &= \alpha \sum_{\vec{x}_{i} \in \query{k}} \left[ \frac{\partial}{\partial\phi} \metric(f_{\phi}(\vec{x}_{i}), \vec{c}_k)  - \frac{\sum_{j} \exp(-\alpha \metric(f_{\phi}(\vec{x}_i), \vec{c}_j)) \frac{\partial}{\partial\phi} \metric(f_{\phi}(\vec{x}_{i}), \vec{c}_j)}{\sum_{j} \exp(-\alpha \metric(f_{\phi}(\vec{x}_i), \vec{c}_j))} \right].
+\end{align}
+At first glance, the effect of $\alpha$ on the expression of the derivative is twofold: (i) an overall scaling, and (ii) regulating the sharpness of weighting in the second term inside the brackets on the RHS. Below we explore the behavior of the $\alpha$-normalized\footnote{The effect of $\alpha$-related gradient scaling is trivial.}  gradient in the limits $\alpha \to 0$ and $\alpha \to \infty$. 
+
+
+\begin{lemma}[Metric scaling] \label{lem:metric_scaling}
+If the following mild assumptions hold: 
+
+$\mathcal{A}_1: \metric(f_{\phi}(\vec{x}), \vec{c}_k) \neq \metric(f_{\phi}(\vec{x'}), \vec{c}_k), \forall k, \vec{x} \neq \vec{x'} \in \query{k}; \ \ \ \ \mathcal{A}_2: \left|\frac{\partial}{\partial\phi} \metric(f_{\phi}(\vec{x}), \vec{c}) \right| < \infty, \forall \vec{x}, \vec{c}, \phi,$
+
+then it is true that:
+\begin{align} 
+    \lim_{\alpha \to 0} \frac{1}{\alpha}\frac{\partial}{\partial\phi}J_k(\phi,\alpha) &= \sum_{\vec{x}_i \in \query{k}} \Big[\frac{K-1}{K} \frac{\partial}{\partial\phi} \metric(f_{\phi}(\vec{x}_{i}), \vec{c}_k)  - \frac{1}{K} \sum_{j \neq k} \frac{\partial}{\partial\phi} \metric(f_{\phi}(\vec{x}_{i}), \vec{c}_j) \Big], \label{eqn:softmax_with_alpha_by_class_derivative_lim_0_result}  \\
+    \lim_{\alpha \to \infty} \frac{1}{\alpha}\frac{\partial}{\partial\phi}J_k(\phi,\alpha) &= \sum_{\vec{x}_i \in \query{k}} \Big[ \frac{\partial}{\partial\phi} \metric(f_{\phi}(\vec{x}_{i}), \vec{c}_k)  - \frac{\partial}{\partial\phi} \metric(f_{\phi}(\vec{x}_{i}), \vec{c}_{j_{i}^*}) \Big]; \label{eqn:softmax_with_alpha_by_class_derivative_lim_infty_result} 
+\end{align}
+where $j_{i}^* = \arg\min_j \metric(f_{\phi}(\vec{x}_i), \vec{c}_j)$. 
+\end{lemma}
+\begin{proof}
+Please refer to Appendix~\ref{ssec:proof_of_metric_scaling_lemma}.
+\end{proof}
+  
+From Eq.~\eqref{eqn:softmax_with_alpha_by_class_derivative_lim_0_result}, it is clear that for small $\alpha$ values, the first term minimizes the embedding distance between query samples and their corresponding prototypes. The second term maximizes the embedding distance between the samples and the prototypes of the non-belonging categories. % This is similar to the Magnet Loss proposed by \citet{rippel2015metric}.
+For large $\alpha$ values (Eq.~\eqref{eqn:softmax_with_alpha_by_class_derivative_lim_infty_result}), the first term is the same as in Eq.~\eqref{eqn:softmax_with_alpha_by_class_derivative_lim_0_result}; while the second term maximizes the distance of the sample with the closest wrongly assigned prototype $\mathbf{c}_{j^*_i}$ (if any). If $j^*_i = k$ (no error), the derivative contribution of the point $\vec{x}_{i}$ is zero. This is equivalent to learning \emph{only} from the hardest examples resulting in association errors. % This can be seen as a form of hard negative mining \cite{schroff2015facenet}.
+Thus, the two different regimes of $\alpha$ favor either minimizing the overlap of the sample distributions or correcting cluster assignments sample-wise. 
+
+The large $\alpha$ regime is more directly related to resolving the few-shot classification errors. At the same time, the update strategy generated in this regime has a drawback. As the optimization proceeds and the classification accuracy increases, the number of incorrectly classified samples reduces on average, and this leads to the reduction in the average effective batch size (more samples generate zero derivatives). Therefore, our hypothesis is that there is an optimal value of scaling parameter $\alpha$ for a given combination of dataset, metric and task. Section~\ref{ssec:multitask_ablation} empirically demonstrates that the optimal value of $\alpha$ indeed exists and it can be \emph{e.g.} cross-validated on a validation set.
+
+
+\subsection{Task conditioning} \label{ssec:tbn_architechture}
+\begin{figure}[t]
+    \centering
+    % \begin{subfigure}[t]{0.45\textwidth}
+    %     \centering
+    %     \includegraphics[width=\textwidth]{cbn_block.pdf}
+    %     \caption{Architecture of the TEN block.}
+    %     \label{fig:tbn_block}
+    % \end{subfigure} \hspace{0.08\textwidth}
+    % \begin{subfigure}[t]{0.45\textwidth}
+    %     \centering
+    %     \includegraphics[width=\textwidth]{cbn_neural_net.pdf}
+    %     \caption{Overall architecture.}
+    %     \label{fig:cbn_architecture}
+    % \end{subfigure}
+    \includegraphics[width=\textwidth]{cbn_neural_net.pdf}
+    \caption{Proposed few-shot architecture. Blocks with shared parameters have dashed border.}
+    \label{fig:cbn_architecture}
+    % \label{fig:architecture_full_and_ten}
+\end{figure}
+
+Up until now we assumed the feature extractor $f_{\phi}(\cdot)$ to be task-independent. A dynamic task-conditioned feature extractor should be better suited for finding correct associations between given \emph{sample} set class representations and query samples. We define such dynamic feature extractor $f_{\phi}(\vec{x}, \Gamma)$, where $\Gamma$ is the set of parameters predicted from a task representation such that the performance of $f_{\phi}(\vec{x}, \Gamma)$ is optimized given the task \emph{sample} set $\examples{}$. This is related to the FILM conditioning layer \citep{perez2017film} and conditional batch normalization~\citep{Dumoulin2017learned,Perez2017LearningVR} of the form $h_{\ell+1} = \bm{\gamma} \odot h_{\ell} + \beta$, where $\bm{\gamma}$ and $\bm{\beta}$ are scaling and shift vectors applied to the layer $h_{\ell}$. Concretely, we propose to use the mean of the class prototypes as the \emph{task representation}, $\overline{\vec{c}} = \frac{1}{C}\sum_k \vec{c}_k$, encode it with a task embedding network (TEN), and predict layer-level element-wise scale and shift vectors $\bm{\gamma}, \bm{\beta}$ for each convolutional layer in the feature extractor (see Figures~\ref{fig:ten_resnet_details} and~\ref{fig:tbn_block} in Appendix~\ref{ssec:components_of_architecture}). 
+ 
+Our implementation of the TEN (see Appendix~\ref{ssec:components_of_architecture} for more details) uses two separate fully connected residual networks to generate vectors $\bm{\gamma}, \bm{\beta}$. Following the terminology in~\citep{Perez2017LearningVR}, the $\bm{\gamma}$ parameter is learned in the delta regime, \emph{i.e.} predicting deviation from unity. The most critical component in being able to successfully train the TEN was the addition of the scalar $L_2$ penalized post-multipliers $\gamma_0$ and $\beta_0$. They limit the effect of $\bm{\gamma}$ (and $\bm{\beta}$) by encoding a prior belief that all components of $\bm{\gamma}$  (and $\bm{\beta}$) should be simultaneously close to zero for a given layer unless task conditioning provides a significant information gain for this layer. Mathematically, this can be expressed as $\bm{\beta} = \beta_0 g_{\theta}(\overline{\vec{c}})$ and $\bm{\gamma} = \gamma_0 h_{\varphi}(\overline{\vec{c}}) + 1$, where $g_{\theta}$ and $h_{\varphi}$ are predictors of $\bm{\beta}$ and $\bm{\gamma}$.
+
+We hypothesize that the importance of TEN is not uniformly distributed over the layers in the feature extractor. The lower layers closer to the similarity metric need to be conditioned more than the shallower layers closer to the image because pixel-level features extracted by shallow level layers are not task specific. 
+
+\subsection{Architecture} \label{ssec:theory_architecture}
+
+The overall proposed few-shot classification architecture is depicted in Fig.~\ref{fig:cbn_architecture} (see Appendix~\ref{ssec:components_of_architecture} for more details). We employ ResNet-12~\citep{He2016Deep} as the backbone feature extractor. It has 4 blocks of depth 3 with 3x3 kernels and shortcut connections. 2x2 max-pool is applied at the end of each block. Convolutional layer depth starts with 64 filters and is doubled after every max-pool. Note that this architecture is similar in spirit to architectures used in~\citep{Bauer2017discriminative} and \citep{munkhdalai2018rapid}, but we do not use any projection layers before or after the main backbone ResNet. On the first pass over sample set, the TEN predicts the values of $\gamma$ and $\beta$ parameters for each convolutional layer in the feature extractor from the task representation. Next, the \emph{sample} set and the \emph{query} set are processed by the feature extractor conditioned with the values of $\gamma$ and $\beta$ just generated. Both outputs are fed into a similarity metric to find an association between class prototypes and query instances. The output of similarity metric is scaled by scalar $\alpha$ and is fed into a softmax layer.
+
+
+%We now briefly describe the architecture's individual building blocks and their interactions. Yellow blocks represent image data inputs. The \emph{sample} set and the \emph{query} set blocks represent few-shot learning tasks with given $C$ and $K$ from a training set. The classification set block samples classification batches from the same training set as the previous two blocks. The feature extractor follows a fully convolutional residual network architecture~\citep{He2016Deep} with 4 ResNet blocks each having 3 convolutional layers. Hence we call it ResNet-12. Each convolutional layer is followed by a batch norm layer and the swish-1 activation function proposed by~\citet{Ramachandran2017searching}. The feature extractor is reused across the four different subtasks. This is signified in the diagram by the dashed perimeter of the block. The convolutional filters of this block are shared to create (i) a task representation using a given sample set, (ii) class prototypes from a given sample set, (iii) to embed \emph{query} set instances, and (iv) to classify instances of the auxiliary classification task. The task representation is created within the task encoding network module by simply averaging the class prototypes obtained by the feature extractor without FILM layers. The rest of the TEN is a fully connected residual network. The width of the TEN is kept constant and is equal to the width of the convolutional kernel that it is associated with (please refer to Fig.~\ref{fig:conv_block} for more details). Once the TEN have generated the values of $\gamma$ and $\beta$ parameters for each convolutional layer in the Feature extractor, the \emph{sample} set and the \emph{query} set are processed by the Feature extractor with FILM conditioning and both outputs are fed into Similarity metric to find association between class prototypes and query instances. The output of similarity metric is scaled by scalar $\alpha$ and is fed into a softmax layer.
+
+\begin{table}[t!]
+\centering
+\label{table:key_results}
+\caption{mini-Imagenet 5-way classification results. $^\dagger$Our re-implementation.}
+\label{table:sota}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\multicolumn{1}{c}{} &  \multicolumn{1}{c}{1-shot} & \multicolumn{1}{c}{5-shot} & \multicolumn{1}{c}{10-shot} \\ \midrule 
+Meta Nets \citep{ravi2016optimization} & 43.4 & 60.6 & -  \\
+Matching Networks \citep{vinyals2016matching} & 46.6 & 60.0 & - \\
+MAML \citep{finn2017model} & 48.7 & 63.1 & - \\
+Proto Nets \citep{snell2017prototypical} & 49.4 & 68.2 & $74.3^{\dagger}$ \\
+Relation Net \citep{sung2018learning} & 50.4 & 65.3 & - \\ 
+SNAIL \citep{mishra2018simle} & 55.7 & 68.9 & - \\ 
+Discriminative k-shot \citep{Bauer2017discriminative} & 56.3 & 73.9 & 78.5 \\ 
+adaResNet \citep{munkhdalai2018rapid} & 56.9 & 71.9 & - \\ \midrule
+Ours & \textbf{58.5} & \textbf{76.7} &  \textbf{80.8}  \\ \bottomrule
+\end{tabular} 
+\end{table}
+
+\subsection{Auxiliary task co-training} \label{ssec:theory_multitask}
+
+%Multitask training has been successfully used to train complex neural network architectures. One particularly relevant example is the inception architecture that was trained with one or more auxiliary logit heads~\citep{Szegedy2015going}. Using an auxiliary task of smaller complexity often helps guiding the convergence of the overall architecture or of its parts in a smoother and more reliable fashion. 
+
+The TEN (Section~\ref{ssec:tbn_architechture}) introduces additional complexity into the architecture via task conditioning layers inserted after the convolutional and batch norm blocks. We empirically observed that simultaneously optimizing convolutional filters and the TEN is overly challenging. We solved the problem by auxiliary co-training with an additional logit head (64-way classification in mini-Imagenet case). The auxiliary task is sampled with a probability that is annealed over episodes. We annealed it using an exponential decay schedule of the form $0.9^{\floor{20t/T}}$, where $T$ is the total number of training episodes, $t$ is episode index. The initial auxiliary task selection probability was cross-validated to be $0.9$ and the number of decay steps was chosen to be 20. We observed significant positive effects from the auxiliary task co-training (please refer to Section~\ref{ssec:multitask_ablation}). The same positive effects were not observed with simple pre-training of the feature extractor. We attribute this to the regularization effects achieved via back-propagating auxiliary task gradients together with those of the main task.
+
+It is of interest to note that the few-shot co-training with an auxiliary classification task is related to curriculum learning~\citep{Santoro16metalearning}. The auxiliary classification problem could be considered a part of a simpler curriculum that helps the learner acquire minimal skill level necessary to proceed to tackle harder few-shot classification tasks. Being effective at feature extraction (i.e. at task representation) forms a ``prerequisite'' at being effective at re-conditioning features based on a representation of a given task.
+
+\section{Experimental Results}\label{sec:experiments}
+
+
+Table~\ref{table:sota} presents our key result and clearly demonstrates that the proposed algorithm significantly improves over the existing state-of-the-art results on the mini-Imagenet dataset. In the rest of the section we find answers to the following research questions: (i) can metric scaling improve few-shot classification results? (Sections~\ref{ssec:cosine_distance} and~\ref{ssec:multitask_ablation}), (ii) what are the contributions of the individual components of our proposed architecture? (Section~\ref{ssec:multitask_ablation}), (iii) can task conditioning improve few-shot classification results and how important it is at different feature extractor depths? (Sections~\ref{ssec:tbn_importance_vs_depth} and~\ref{ssec:multitask_ablation}), and (iv) can auxiliary classification task co-training improve accuracy on the few-shot classification task? (Section~\ref{ssec:multitask_ablation}).
+
+\subsection{Experimental setup and datasets}\label{ssec:datasets}
+
+The details of the experimental and training setup are provided in Appendix~\ref{ssec:training_procedure_details}. In the following, we describe the datasets used in our experiments.
+
+\textbf{mini-Imagenet.}~The mini-Imagenet dataset was proposed by~\citet{vinyals2016matching}. This dataset is more complex than CIFAR10 and is especially suitable for few shot learning scenarios. It has 100 classes, with 600 $84 \times 84$ images per class. Each task is generated by sampling 5 classes uniformly and 5 training samples per class, the remaining images from the 5 classes are used as query images to compute accuracy. To perform meta-validation and meta-test on unseen tasks (and classes), we isolate 16 and 20 classes from the original set of 100, leaving 64 classes for the training tasks. We use exactly the same train/validation/test split as the one suggested by~\citet{ravi2016optimization}. 
+
+\textbf{Fewshot-CIFAR100.}~We introduce a new image based dataset based on CIFAR100~\citep{Krizhevsky2009learning} for few-shot learning. We will refer to it as FC100. The main motivation for introducing this new dataset is to validate that the main results appearing in the experimental section generalize well beyond the mini-Imagenet. The secondary motivation is that the FC100 is suited for faster few-shot scenario prototyping than the mini-Imagenet and it presents a more challenging few-shot learning problem, because of reduced image size. On top of that, we propose a class split in FC100 to minimize the information overlap between splits to make it significantly more challenging than \emph{e.g.} Omniglot. The original CIFAR100 dataset consists of $32 \times 32$ color images belonging to 100 different classes, 600 images per class. The 100 classes are further grouped into 20 superclasses. We split the dataset by superclass, rather than by individual class to minimize the information overlap. Thus the train part contains 60 classes belonging to 12 superclasses, the validation and test contain 20 classes belonging to 5 superclasses each. The exact class split is provided in Appendix~\ref{sec:fc100_details}.
+
+\subsection{On the similarity metric}\label{ssec:cosine_distance}
+% \subsection{Make cosine distance great again}\label{ssec:cosine_distance}
+
+\begin{table}[t]
+% This table is based on 
+% https://github.com/ElementAI/deep-prior/tree/task_embedding
+% commit 640a814a526572f0a6c354ec4e47621c9a9dba96
+% imagenet results in /mnt/home/boris/experiments_task_encoder/180326_012431_mini_imagenet_encoder_classifier_link_number_of_steps_data_dir_metric_multiplier_init_metric_multiplier_trainable_repeat_num_classes_train_simple_conv_net_mini_imagenet_baseline_with_relu/
+% cifar100 results in /mnt/home/boris/experiments_task_encoder/180326_170423_mini_imagenet_encoder_classifier_link_number_of_steps_metric_multiplier_init_metric_multiplier_trainable_repeat_num_classes_train_simple_conv_net_cifar100/
+    \centering
+    \caption{Average classification accuracy in percent with 95\% confidence interval. 5-shot, 5 way classification task. The three last rows correspond to our implementation.}
+    \label{table:cosine_vs_euclidian}
+    \begin{tabular}{p{50mm} cccc} 
+        \toprule
+         & \multicolumn{2}{c}{mini-Imagenet}  & \multicolumn{2}{c}{FC100}  \\ 
+         & 5-way train    &  20-way train   & 5-way train &  20-way train  \\ 
+        \hline
+        Proto Nets \cite{snell2017prototypical} & 65.8 $\pm$ 0.7 & 68.2 $\pm$ 0.7 & {N/A}  & {N/A}  \\
+        \hline
+        Proto Nets & 67.7 $\pm$ 0.2 & 68.9 $\pm$ 0.3 & 51.1 $\pm$ 0.2  & 50.3 $\pm$ 0.3  \\
+        %Matching Networks \cite{vinyals2016matching} &  51.1 $\pm$ 0.7   & N/A   & N/A  & N/A  \\ 
+        %\hline 
+        %Matching Networks FCE \cite{vinyals2016matching} &  55.3 $\pm$ 0.7   & N/A   & N/A  & N/A  \\ 
+        Prototypical Cosine & 54.5 $\pm$ 1.1   & 53.9 $\pm$ 0.6   & 40.9 $\pm$ 0.6   & 37.1 $\pm$ 1.9  \\ 
+        Prototypical Cosine Scaled &  68.2 $\pm$ 0.8  & 68.1 $\pm$ 0.7  & 51.0 $\pm$ 0.6  & 49.6 $\pm$ 0.5   \\  
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+We re-implemented prototypical networks~\citep{snell2017prototypical}, and use the Euclidean and the cosine similarity to test the effects of scaling (see Section~\ref{sec:model}). We closely follow the experimental setup defined by~\citet{snell2017prototypical} (same feature extractor and training procedure). The scaling parameter $\alpha$ was cross-validated on the validation set. Results are presented in Table~\ref{table:cosine_vs_euclidian}.
+%The second row of Table~\ref{table:cosine_vs_euclidian} verifies the correctness of our implementation of the prototypical networks and the overall training procedure on the Mini-Imagent dataset. With the same feature extractor and the class split we are able to reproduce the result as reported in~\citep{snell2017prototypical} (this is not presented in the table for brevity). 
+
+As it can be seen in row two of Table~\ref{table:cosine_vs_euclidian}, we observed an increase in the performance of Proto Nets \citep{snell2017prototypical} to 68.9\% and 67.7\% in 20-way and 5-way training scenarios respectively by increasing the number of training steps from 20K to 40K\footnote{With 20K steps it was possible to recover the exact original performance reported in \citet{snell2017prototypical}, which is not included in Table~\ref{table:cosine_vs_euclidian} for the sake of brevity.}. We also verified the performance drop reported in \citep{snell2017prototypical} when using the cosine similarity metric. 
+
+Importantly, we confirm the hypothesis that the improvement attributed to the Euclidean distance in \cite{snell2017prototypical} was due to a scaling effect. Namely, we show that the scaled cosine similarity matches very closely the performance of the Euclidean metric, with an improvement of 14 percentage points on the mini-Imagenet (similar results on FC100) over the non-scaled version. In order to control for the potential effect that the scaling parameter $\alpha$ may have on the learning rate as indicated by Equation~\eqref{eqn:softmax_with_alpha_total_derivative} training was performed using multiple initial learning rates (covering the range between 0.0005 and 0.01), obtaining similar accuracy each time. 
+
+\subsection{TEN importance across layers} \label{ssec:tbn_importance_vs_depth}
+
+\begin{figure}[t]
+    \centering
+    \begin{subfigure}[t]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{beta_gamma_MIN.pdf}
+        \caption{Results on mini-Imagenet.}
+        \label{fig:tbn_scaling_miniimagenet}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{beta_gamma_CIFAR100.pdf}
+        \caption{Results on FC100.}
+        \label{fig:tbn_scaling_cifar100}
+    \end{subfigure}
+    \caption{Distribution of the absolute values of the TEN scaling and bias parameters $\gamma_0$ and $\beta_0$ across layers of ResNet feature extractor. X-axes depict layer number in both subplots. Layers with larger numbers are located closer to the final softmax layer.}
+    \label{fig:tbn_scaling}
+\end{figure}
+
+We hypothesized in Section~\ref{ssec:tbn_architechture} that the TEN conditioning should not be equally important at all depths. Fig.~\ref{fig:tbn_scaling} depicts the boxplot of the empirical observations of the learned TEN post-multipliers\footnote{Larger absolute values of $\gamma_0$ and $\beta_0$ imply a larger influence of their respective TEN layers} $\gamma_0$ and $\beta_0$ at different depths of the feature extractor.\footnote{Hereinafter, we report the results with the Euclidean metric for brevity. The cosine produces similar results.}  We can see that for the multiplier $\gamma$, the absolute value of its scale $\gamma_0$ tends to increase as we approach the softmax layer. Interestingly, peaks can be observed every 3 layers (layers 3, 6, 9, 12). The peaks correspond to the location of the convolutional layers preceding the max-pool layers. For the bias parameter $\beta_0$, the only layer having a large absolute value of its scale is the last layer, before the softmax. We attribute the observed pattern to the fact that the shallower layers in the feature extractor tend to be less task-specific than the deeper layers. Following this intuition, we performed experiments in which we (i) kept the TEN injection solely in layers preceding the max pool and (ii) kept the TEN injection only in the very last layer. Interestingly, we saw that TEN layers with small weight still provide some positive contribution, although most of the contribution is indeed provided by the layers preceding the max pool operation.
+
+
+\subsection{Ablation study} \label{ssec:multitask_ablation}
+
+\begin{table}[t] 
+% This table is based on 
+% https://github.com/ElementAI/deep-prior/tree/task_embedding
+% commit 9ef29e5c2c7656dfeceeb88ff096fe986ba10e36
+%
+% imagenet 5-shot results in 
+% No multitask, polynomial, double the number of steps: ROOT_DIR='/mnt/home/boris/experiments_task_encoder/180508_195508_mini_imagenet_num_max_pools_encoder_classifier_link_feat_extract_pretrain_metric_multiplier_init_cbn_num_layers_repeat_scale_maxpool3'
+%
+% imagenet 1-shot results in 
+% ROOT_DIR='/mnt/home/boris/experiments_task_encoder/180503_102004_mini_imagenet_num_tasks_per_batch_encoder_classifier_link_feat_extract_pretrain_train_batch_size_metric_multiplier_init_number_of_steps_cbn_num_layers_repeat_scale_1shot_first_run'
+% 
+% cifar100 1-shot results in 
+% 180505_022014_mini_imagenet_num_tasks_per_batch_encoder_classifier_link_feat_extract_pretrain_train_batch_size_metric_multiplier_init_number_of_steps_cbn_num_layers_repeat_scale_crossvalidation_CIFAR100_1shot
+%
+% imagenet 10-shot results in
+% ROOT_DIR='/mnt/home/boris/experiments_task_encoder/180506_020918_mini_imagenet_encoder_classifier_link_feat_extract_pretrain_metric_multiplier_init_init_learning_rate_number_of_steps_cbn_num_layers_repeat_scale_10shot'
+%
+% CIFAR100 10-shot results in
+% ROOT_DIR='/mnt/home/boris/experiments_task_encoder/180507_015250_mini_imagenet_num_tasks_per_batch_encoder_classifier_link_feat_extract_pretrain_metric_multiplier_init_init_learning_rate_number_of_steps_cbn_num_layers_repeat_scale_crossval_CIFAR100_10shot'
+
+    \centering
+    \caption{Average classification accuracy (\%) with 95\% confidence interval on the 5 way classification task, and training with the Euclidean distance. The scale parameter is cross-validated on validation set. AT: auxiliary co-training. TC: task conditioning with TEN.}
+    \label{table:multitask_results}
+    \begin{tabular}{ccccccccc} 
+        \toprule
+        \multicolumn{1}{c}{} & \multicolumn{1}{c}{} & \multicolumn{3}{c}{mini-Imagenet}  & \multicolumn{3}{c}{FC100}  \\ 
+        $\alpha$ & AT & TC & 1-shot    &  5-shot & 10-shot   & 1-shot &  5-shot & 10-shot  \\ \hline
+         & & & 56.5 $\pm$ 0.4 & 74.2 $\pm$ 0.2 & 78.6 $\pm$ 0.4 & 37.8 $\pm$ 0.4 & 53.3 $\pm$ 0.5 & 58.7 $\pm$ 0.4   \\
+        \checkmark & & & 56.8 $\pm$ 0.3 & 75.7 $\pm$ 0.2 & 79.6 $\pm$ 0.4 & 38.0 $\pm$ 0.3 & 54.0 $\pm$ 0.5 & 59.8 $\pm$ 0.3   \\
+        \hline
+        \checkmark & \checkmark & & 58.0 $\pm$ 0.3 & 75.6 $\pm$ 0.4 & 80.0  $\pm$ 0.3  & 39.0 $\pm$ 0.4 & 54.7 $\pm$ 0.5 & 60.4 $\pm$ 0.4   \\
+        \checkmark &  & \checkmark & 54.4 $\pm$ 0.3 & 74.6 $\pm$ 0.3 & 78.7 $\pm$ 0.4  & 37.8 $\pm$ 0.2 & 54.0 $\pm$ 0.7 & 58.8 $\pm$ 0.3   \\
+        \checkmark & \checkmark & \checkmark & \textbf{58.5 $\pm$ 0.3} & \textbf{76.7 $\pm$ 0.3} & \textbf{80.8 $\pm$ 0.3}  & \textbf{40.1 $\pm$ 0.4} & \textbf{56.1 $\pm$ 0.4} & \textbf{61.6 $\pm$ 0.5}  \\
+        \bottomrule 
+    \end{tabular}
+\end{table}
+
+\begin{figure}[t]
+% This is based on plot_scale_crossvalidation.ipynb
+%
+% MINIIMAGENET:
+% ROOT_DIR='/mnt/home/boris/experiments_task_encoder/180422_013228_mini_imagenet_metric_multiplier_trainable_encoder_classifier_link_feat_extract_pretrain_polynomial_metric_order_metric_multiplier_init_cbn_per_block_cbn_num_layers_repeat_scaling_crossvalidation_min'
+
+    \centering
+    \begin{subfigure}[t]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{scale_crossvalidation_polynomial_MIN.png}
+        \caption{Scaled Euclidean. mini-Imagenet.}
+        \label{fig:scaled_euclidean_miniimagenet}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{scale_crossvalidation_polynomial_CIFAR100.png}
+        \caption{Scaled Euclidean. FC100.}
+        \label{fig:scaled_euclidean_cifar100}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{scale_crossvalidation_cbn_MIN.png}
+        \caption{Scaled Euclidean with TEN. mini-Imagenet.}
+        \label{fig:scaled_euclidean_with_tbn_miniimagenet}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{scale_crossvalidation_cbn_CIFAR100.png}
+        \caption{Scaled Euclidean with TEN. FC100.}
+        \label{fig:scaled_euclidean_with_tbn_cifar100}
+    \end{subfigure}
+    \caption{Metric scale parameter $\alpha$ cross-validation results.}
+    \label{fig:metric_scaling}
+\end{figure}
+
+% \begin{table}[t] 
+% % This table is based on 
+% % https://github.com/ElementAI/deep-prior/tree/task_embedding
+% % commit 7418e0aee3a52cae68305d1bb8fd1ba63fe19b1d
+
+% % imagenet results in b042ca28354cf9cc7f74ee63cc83fd2361caf033
+% % ROOT_DIR='/mnt/home/boris/experiments_task_encoder/180426_135538_mini_imagenet_metric_multiplier_trainable_encoder_classifier_link_feat_extract_pretrain_polynomial_metric_order_init_learning_rate_number_of_steps_repeat_optimizer_adam_vs_sgd/'
+
+% % cifar100 results in 
+% % ROOT_DIR='/mnt/home/boris/experiments_task_encoder/180424_125559_mini_imagenet_metric_multiplier_trainable_encoder_classifier_link_feat_extract_pretrain_init_learning_rate_number_of_steps_cbn_per_block_cbn_num_layers_repeat_optimizer_adam_vs_sgd_CIFAR100/'
+%     \centering
+%     \begin{tabular}{p{50mm} cc} 
+%         \hline
+%          & \multicolumn{1}{c}{mini-Imagenet}  & \multicolumn{1}{c}{fewshot-CIFAR100}  \\ 
+%         \hline
+%         Prototypical Euclidean \\ ResNet-12/Adam  & 72.1 $\pm$ 0.4 & 53.6 $\pm$ 0.5   \\
+%         \hline 
+%         Prototypical Euclidean \\ ResNet-12/SGD  & 74.2 $\pm$ 0.4 & 53.4  $\pm$ 0.4   \\
+%         \hline 
+%     \end{tabular}
+% \caption{Average classification accuracy in percent with 95\% confidence interval. 5-shot, 5 way classification task.}
+% \label{table:resnet_feature_extractor}
+% \end{table}
+
+In this section, we study the impact in generalization accuracy of the scaling, task conditioning, auxiliary co-training, and the feature extractor. Results are summarized in Table \ref{table:multitask_results}.
+
+First, we validated the hypothesis that there is an optimal value of the metric scaling parameter ($\alpha$) for a given combination of dataset and metric, which is reflected in the inverse U-shape of the curves in Fig. \ref{fig:metric_scaling}.
+
+Second, we studied the effects of the task conditioning described in Section~\ref{ssec:tbn_architechture}. No improvement was observed for the task-conditioned ResNet-12 without auxiliary co-training (see Table \ref{table:multitask_results}). We observed that learning useful features for the TEN and the main feature extractor at the same time is hard and gets stuck in local extrema. The problem is solved by co-training on the auxiliary task of predicting Imagenet labels using an additional fully-connected layer with softmax, see Section \ref{ssec:theory_multitask}. In effect, we observed that auxiliary co-training provides two benefits: (i) making the initial convergence easier, and (ii) providing regularization on the few-shot learning task by forcing the feature extractor to perform well on two decoupled tasks. The latter benefit can only be observed when the feature extraction unit is sufficiently decoupled on the main task and the auxiliary task via the use of TEN (the feature extractor output is additionally adjusted on the target task using FILM).
+
+As it can be seen in the last row of Tables \ref{table:sota} and \ref{table:multitask_results}, our model trained with TEN and auxiliary co-training outperforms all the baselines and achieves state-of-the-art results.
+
+
+%Finally, we tested if better performance could be obtained with deeper feature extractors such as the ResNet-34 used by \citet{Bauer2017discriminative}, but we did not observe significant improvement in our setup.
+
+\section{Conclusions and Future Work} \label{sec:conclusions}
+We proposed, analyzed, and empirically validated several fundamental improvements in the domain of few-shot learning. We showed that the scaled cosine similarity, which does not belong to the class of Bregman divergences, still performs at par with Euclidean distance, contrary to previous conjectures. In fact, based on our results, we argue that the scaling factor is a necessary standard component of any few-shot learning algorithm relying on a similarity metric and the cross-entropy loss function. This is especially important in the context of finding new more effective similarity measures for few-shot learning. Moreover, our theoretical analysis demonstrated that simply scaling the similarity metric results in completely different regimes of parameter updates when using softmax and categorical cross-entropy. We also identified that the optimal performance is achieved in between two asymptotic regimes of the softmax. This poses the research question of explicitly designing update rules, schedules, and task sampling techniques optimal for few-shot learning. In practice, that could be accomplished through (i) designing alternatives to the loss function based on the combination of the softmax activation with a categorical loss, and/or (ii) using suitable batch mining strategies to provide parameter updates balancing dataset exploration, non-trivial information extraction, and effective batch size preservation. We further proposed task representation conditioning as a way to improve the performance of a feature extractor on the few-shot classification task. This paves the way for learning task-dependent versatile metric spaces significantly extending existing meta-learning paradigm. The experimental results obtained on two independent challenging datasets demonstrated that the proposed approach significantly improves over existing results and achieves state-of-the-art on few-shot image classification task.  
+
+
+%The key takeaways from the empirical evaluation presented earlier are the following. First, the increased capacity ResNet-12 based fully convolutional feature extractor provides significant gain over AlexNet style architecture previously used \emph{e.g.} by~\cite{snell2017prototypical,vinyals2016matching}. This feature extractor used with the prototypical approach, Euclidean distance, and trained in episodic training setting performs slightly better than the deeper ResNet-34 trained in the Bayesian context disregarding the episodic training paradigm as proposed in~\citep{Bauer2017discriminative}. Second, the scaling factor that we proposed to insert between the similarity metric and the softmax turned out to be a key to improving performance of few-shot classification both with cosine similarity and Euclidean distance. We validated this discovery on two independent challenging datasets. The use of the scaling factor significantly extends the class of metrics that perform well on a few-shot classification task. Our experimental results suggest that the choice of scale may be even more important than the choice of metric itself. For example, the scaled cosine similarity, which does not belong to the class of Bregman divergences still performs at par with Euclidian distance. In fact, based on our results, we argue that the scaling factor should be a necessary standard component of any few-shot learning algorithm relying on similarity metric and cross-entropy loss function. This is especially important in the context of finding new more effective similarity measures for few-shot learning. Third, we validated that adding conditioning of convolutional layer outputs on task representation further improves few-shot classification. The architecture based on this principle achieves state of the art results on two independent datasets. We also discovered that for this architechture auxiliary co-training on a simpler fixed class set classification problem was critical to ensure smooth convergence and avoidance of local minima. 
+%Our results suggest several promising directions for future research. For example, metric scaling provides a contribution to the methodology of searching the space of similarity metrics (other than the Euclidean and the cosine). Given our results on metric scaling we are now better equipped to perform similarity metric optimization, \emph{e.g.} based on Reinforcement learning (\emph{c.f.} activation function optimization by~\citet{Ramachandran2017searching}). 
+%We demonstrated the promise of task representation conditioning in the few-shot classification, but the design of conditioning architectures capable of fully utilizing the information contained in a \emph{sample} set is an open research question. Even more importantly, the ability to tailor feature extractor for the task at hand raises an interesting problem of \emph{sample} set sufficiency and relates it back to the active learning paradigm. Can we predict the performance of the task conditioned feature extractor and request more task samples if predicted performance is not acceptable? 
+
+
+% \newpage
+% Inserting this, because previously observed problems with paper checker, because the actual text hight was 9.36 instead of 9. Using 8.5 in geometry resolved the problem
+% \newgeometry{textheight=8.5in,
+%     textwidth=5.5in,
+%     top=1in,
+%     headheight=12pt,
+%     headsep=25pt,
+%     footskip=30pt}
+    
+\bibliography{main}
+\bibliographystyle{abbrvnat}
+
+\newpage
+\appendix
+\section*{Appendix}
+
+\section{Proof of Lemma~\ref{lem:metric_scaling}} \label{ssec:proof_of_metric_scaling_lemma}
+
+First, consider the case $\alpha \to 0$. Recalling that $\vec{z}_i^{\phi} = f_{\phi}(\vec{x}_i)$ we have:
+\begin{align} % \label{eqn:softmax_with_alpha_by_class_derivative_lim_0}
+    \lim_{\alpha \to 0} \frac{1}{\alpha}\frac{\partial}{\partial\phi}J_k(\phi,\alpha) &= \sum_{\vec{x}_i \in \query{k}} \frac{\partial}{\partial\phi} \metric(\vec{z}_i^{\phi}, \vec{c}_k)  - \lim_{\alpha \to 0} \frac{\sum_{j} \exp(-\alpha \metric(\vec{z}_i^{\phi}, \vec{c}_j)) \frac{\partial}{\partial\phi} \metric(\vec{z}_i^{\phi}, \vec{c}_j)}{\sum_{j} \exp(-\alpha \metric(\vec{z}_i^{\phi}, \vec{c}_j))} \nonumber \\
+    &= \sum_{\vec{x}_i \in \query{k}} \frac{\partial}{\partial\phi} \metric(\vec{z}_i^{\phi}, \vec{c}_k)  - \frac{1}{K} \sum_{j} \frac{\partial}{\partial\phi} \metric(\vec{z}_i^{\phi}, \vec{c}_j) \nonumber \\
+    &= \sum_{\vec{x}_i \in \query{k}} \frac{K-1}{K} \frac{\partial}{\partial\phi} \metric(\vec{z}_i^{\phi}, \vec{c}_k)  - \frac{1}{K} \sum_{j \neq k} \frac{\partial}{\partial\phi} \metric(\vec{z}_i^{\phi}, \vec{c}_j). \nonumber
+\end{align}
+Second, consider the case  $\alpha \to \infty$:
+\begin{align} % \label{eqn:softmax_with_alpha_by_class_derivative_lim_infty}
+    \lim_{\alpha \to \infty} \frac{1}{\alpha}\frac{\partial}{\partial\phi}J_k(\phi,\alpha) &= \sum_{\vec{x}_i \in \query{k}} \frac{\partial}{\partial\phi} \metric(\vec{z}_i^{\phi}, \vec{c}_k)  - \sum_{j} \lim_{\alpha \to \infty} \frac{\exp(-\alpha \metric(\vec{z}_i^{\phi}, \vec{c}_j)) \frac{\partial}{\partial\phi} \metric(\vec{z}_i^{\phi}, \vec{c}_j)}{\sum_{\ell} \exp(-\alpha \metric(\vec{z}_i^{\phi}, \vec{c}_\ell))} \nonumber \\
+    &= \sum_{\vec{x}_i \in \query{k}} \frac{\partial}{\partial\phi} \metric(\vec{z}_i^{\phi}, \vec{c}_k)  - \sum_{j} \lim_{\alpha \to \infty} \frac{\frac{\partial}{\partial\phi} \metric(\vec{z}_i^{\phi}, \vec{c}_j)}{1 + \sum_{\ell \neq j}  \exp(-\alpha [\metric(\vec{z}_i^{\phi}, \vec{c}_\ell) - \metric(\vec{z}_i^{\phi}, \vec{c}_j)])}. \nonumber
+\end{align}
+It is obvious that whenever at least one of the exponential terms in the denominator in the expression above has positive rate, corresponding to the case $\exists \ell\neq j:  [\metric(\vec{z}_i^{\phi}, \vec{c}_\ell) - \metric(\vec{z}_i^{\phi}, \vec{c}_j)] < 0$, the ratio converges to zero as  $\alpha \to \infty$ under assumption $\mathcal{A}_2$. The only case when the limit is non-zero is when $\vec{c}_j$ is the prototype closest to the query point $\vec{x}_i$. If we define the index of this prototype as $j_{i}^* = \arg\min_j \metric(\vec{z}_i^{\phi}, \vec{c}_j)$, then the following holds: $\forall \ell\neq j_{i}^*:  [\metric(\vec{z}_i^{\phi}, \vec{c}_\ell) - \metric(\vec{z}_i^{\phi}, \vec{c}_{j_{i}^*})] > 0$, leading (under additional assumption $\mathcal{A}_1$) to:
+\begin{align} 
+\lim_{\alpha \to \infty} \frac{1}{1 + \sum_{\ell \neq j}  \exp(-\alpha [\metric(\vec{z}_i^{\phi}, \vec{c}_\ell) - \metric(\vec{z}_i^{\phi}, \vec{c}_{j_{i}^*})])} = 1. \nonumber
+\end{align}
+Therefore,~\eqref{eqn:softmax_with_alpha_by_class_derivative_lim_infty_result} follows. \qed
+
+
+\section{Architecture details} \label{ssec:components_of_architecture}
+
+\begin{figure}[h]
+    \centering
+    \begin{subfigure}[t]{0.35\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{conv_block.pdf}
+        \caption{Convolutional block with TEN.}
+        \label{fig:conv_block}
+    \end{subfigure} \hspace{0.15\textwidth}
+    \begin{subfigure}[t]{0.3\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{resnet_block.pdf}
+        \caption{Resnet block with TEN.}
+        \label{fig:resnet_block}
+    \end{subfigure}
+    \caption{Components of the ResNet-12 feature extractor.}
+    \label{fig:ten_resnet_details}
+\end{figure}
+
+\textbf{ResNet-12 architecture details.} The resnet blocks used in the ResNet-12 feature extractor are shown in Fig.~\ref{fig:ten_resnet_details}. The feature extractor consists of 4 resnet blocks shown in Fig.~\ref{fig:resnet_block} followed by a global average-pool. Each resnet block consists of 3 convolutional blocks shown in Fig.~\ref{fig:conv_block} followed by 2x2 max-pool. Each convolutional layer is followed by a batch norm layer and the swish-1 activation function proposed by~\citet{Ramachandran2017searching}. We found that the fully convolutional architecture performs best as a few-shot feature extractor, both on mini-Imagenet and on FC100. We found that inserting additional projection layers after the ResNet stack was always detrimental to the few-shot performance. We cross-validated this result with multiple hyper-parameter settings for the projection layers (number of layers, layer widths, and dropout). In addition to that, we observed that adding extra convolutional layers and max-pool layers before the ResNet stack was detrimental to the few-shot performance. Therefore, we used fully convolutional, fully residual architecture in all our experiments.
+
+The hyperparameters for the convolutional layers are as follows. The number of filters for the first ResNet block was set to 64 and it was doubled after each max-pool block. The $L_2$ regularizer weight was cross-validated at 0.0005 for each layer.
+
+\textbf{TEN architecture details.} The detailed architecture of the TEN block is depicted in Fig.~\ref{fig:tbn_block}. Our implementation of the TEN uses two separate fully connected residual networks to generate vectors $\bm{\gamma}, \bm{\beta}$. We cross-validated the number of layers to be 3. The first layer projects the task representation into the target width. The target width is equal to the number of filters of the convolutional layer that the TEN block is conditioning (see Fig.~\ref{fig:conv_block}). The remaining layers operate at the target width and each of them has a skip connection. The $L_2$ regularizer weight for $\gamma_0$ and $\beta_0$  was cross-validated at 0.01 for each layer. We found that smaller values led to considerable overfit. In addition to that, we were not able to successfully train TEN without $\gamma_0$ and $\beta_0$, because the training tended to be stuck in local minima where the overall effect of introducing TEN was detrimental to the few-shot performance of the architecture.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.5\textwidth]{cbn_block.pdf}
+    \caption{Architecture of the TEN block.}
+    \label{fig:tbn_block}
+\end{figure}
+
+
+\section{Few-shot CIFAR100 details} \label{sec:fc100_details}
+
+\textbf{Train split.}~Super-class labels: \{1, 2, 3, 4, 5, 6, 9, 10, 15, 17, 18, 19\}; super-class names: \{fish, flowers, food\_containers, fruit\_and\_vegetables, household\_electrical\_devices, household\_furniture, large\_man-made\_outdoor\_things, large\_natural\_outdoor\_scenes, reptiles, trees, vehicles\_1, vehicles\_2\}. 
+
+\textbf{Validation split.}~Super-class labels: \{8, 11, 13, 16\}; super-class names: \{large\_carnivores, large\_omnivores\_and\_herbivores, non-insect\_invertebrates, small\_mammals\}.
+
+\textbf{Test split.}~Super-class labels: \{0, 7, 12, 14\}; super-class names: \{aquatic\_mammals, insects, medium\_mammals, people\}.
+
+
+\section{Training procedure details} \label{ssec:training_procedure_details}
+
+\textbf{Episode composition.} The training procedure composes a few-shot training batch from several tasks, where a task is understood to be a fixed selection of 5 classes. We found empirically that for the 5-shot scenario the best number of tasks per batch was 2, for 10-shot it was 1 and for 1-shot it was 5. The \emph{sample} set in each training batch was created using the same number of shots as in the target deployment (test) scenario. The images in the training \emph{query} set were sampled uniformly at random. We observed that the best results were obtained when the number of query images was approximately equal to the total number of sample images in the batch. Thus we used 32 query images per task for 5-shot, 64 for 10-shot and 12 for 1-shot. 
+
+\textbf{The auxiliary classification task} co-training used a fixed batch of 64 image samples sampled uniformly at random from the training set. The learning rate annealing schedule for the auxiliary task was synchronized with that of the main few-shot task.
+
+\textbf{Optimization, scheduling and learning rate.} When training with auxiliary classification task we used total 30000 episodes for training on mini-Imagenet and 10000 episodes for training on FC100. The results obtained with no auxiliary classification co-training used twice as many episodes. To obtain all our results we used SGD with momentum 0.9 and initial learning rate set at 0.1. The learning rate was annealed by a factor of 10 halfway through the training and two more times every 2500 episodes. The reported numbers are calculated using early-stopping based on validation set classification error tracking.
+
+\textbf{Classification accuracy evaluation.} The accuracy is evaluated using 10 random restarts of the optimization procedure and based on 500 randomly generated tasks each having 100 random query samples.
+
+\textbf{Reproducing results in~\citep{snell2017prototypical}.} To reproduce the results reported in~\citep{snell2017prototypical} we used exactly the same setup and network architecture reported in the original paper.
+
+
+
+
+
+
+
+\iffalse
+
+\section{Scale crossvalidation results: 1 and 10-shot} \label{sec:one_shot_alpha_results}
+
+\begin{figure}[t]
+% This is based on plot_scale_crossvalidation.ipynb
+%
+% MINIIMAGENET:
+% ROOT_DIR='/mnt/home/boris/experiments_task_encoder/180422_013228_mini_imagenet_metric_multiplier_trainable_encoder_classifier_link_feat_extract_pretrain_polynomial_metric_order_metric_multiplier_init_cbn_per_block_cbn_num_layers_repeat_scaling_crossvalidation_min'
+% CIFAR100:
+% 180505_022014_mini_imagenet_num_tasks_per_batch_encoder_classifier_link_feat_extract_pretrain_train_batch_size_metric_multiplier_init_number_of_steps_cbn_num_layers_repeat_scale_crossvalidation_CIFAR100_1shot
+    \centering
+    \begin{subfigure}[t]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{scale_crossvalidation_polynomial_MIN_1shot.png}
+        \caption{Scaled Euclidean. mini-Imagenet.}
+        \label{fig:scaled_euclidean_miniimagenet_1shot}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{scale_crossvalidation_polynomial_CIFAR100_1shot.png}
+        \caption{Scaled Euclidean. FC100.}
+        \label{fig:scaled_euclidean_cifar100_1shot}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{scale_crossvalidation_cbn_MIN_1shot.png}
+        \caption{Scaled Euclidean with FILM. mini-Imagenet.}
+        \label{fig:scaled_euclidean_with_tbn_miniimagenet_1shot}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{scale_crossvalidation_cbn_CIFAR100_1shot.png}
+        \caption{Scaled Euclidean with FILM. FC100.}
+        \label{fig:scaled_euclidean_with_tbn_cifar100_1shot}
+    \end{subfigure}
+    \caption{1-shot $\alpha$ crossvalidation results.}
+    \label{fig:metric_scaling_1shot}
+\end{figure}
+
+
+\begin{figure}[t]
+% This is based on plot_scale_crossvalidation.ipynb
+%
+% MINIIMAGENET:
+% ROOT_DIR='/mnt/home/boris/experiments_task_encoder/180422_013228_mini_imagenet_metric_multiplier_trainable_encoder_classifier_link_feat_extract_pretrain_polynomial_metric_order_metric_multiplier_init_cbn_per_block_cbn_num_layers_repeat_scaling_crossvalidation_min'
+% CIFAR100:
+% 180505_022014_mini_imagenet_num_tasks_per_batch_encoder_classifier_link_feat_extract_pretrain_train_batch_size_metric_multiplier_init_number_of_steps_cbn_num_layers_repeat_scale_crossvalidation_CIFAR100_1shot
+    \centering
+    \begin{subfigure}[t]{0.49\textwidth}
+        % \includegraphics[width=\textwidth]{scale_crossvalidation_polynomial_MIN_1shot.png}
+        \caption{Scaled Euclidean. mini-Imagenet.}
+        \label{fig:scaled_euclidean_miniimagenet_10shot}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.49\textwidth}
+        % \includegraphics[width=\textwidth]{scale_crossvalidation_polynomial_CIFAR100_1shot.png}
+        \caption{Scaled Euclidean. FC100.}
+        \label{fig:scaled_euclidean_cifar100_10shot}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.49\textwidth}
+        % \includegraphics[width=\textwidth]{scale_crossvalidation_cbn_MIN_1shot.png}
+        \caption{Scaled Euclidean with FILM. mini-Imagenet.}
+        \label{fig:scaled_euclidean_with_tbn_miniimagenet_10shot}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.49\textwidth}
+        % \includegraphics[width=\textwidth]{scale_crossvalidation_cbn_CIFAR100_1shot.png}
+        \caption{Scaled Euclidean with FILM. FC100.}
+        \label{fig:scaled_euclidean_with_tbn_cifar100_10shot}
+    \end{subfigure}
+    \caption{10-shot $\alpha$ crossvalidation results.}
+    \label{fig:metric_scaling_10shot}
+\end{figure}
+\fi
+
+% \section{Polynomial Metric Scaling} \label{sec:polynomial_metric_scaling}
+
+% The model presented in~\eqref{eqn:euclidean_and_cosine} can be made more general. For example, looking at~\eqref{eqn:softmax_with_alpha} we can see that the cosine distance is a second order polynomial in the Euclidean distance with normalized inputs whereas~\eqref{eqn:euclidean_and_cosine} contains a first order polynomial in arbitrary metric. We propose to generalize~\eqref{eqn:euclidean_and_cosine} using a polynomial of arbitrary degree with learnable weights:
+% \begin{align} \label{eqn:softmax_with_polynomial}
+%     p(y=k|\vec{x}) = \frac{\exp(-\sum_n \alpha_n \metric(f_{\phi}(\vec{x}), \vec{c}_k)^n)}{\sum_{j} \exp(-\sum_n \alpha_n \metric(f_{\phi}(\vec{x}), \vec{c}_j)^n)}.
+% \end{align}
+% Our hypothesis is that the nonlinear transformation of the metric will result in shaping the distribution of the metric that helps associating $\vec{x}$ with correct $\vec{c}_k$.
+
+
+% \begin{figure}[t]
+% % This is based on plot_polynomial_degree.ipynb
+% % 
+% % # CIFAR100, polynomial degree
+% % ROOT_DIR='/mnt/home/boris/experiments_task_encoder/180426_205258_mini_imagenet_metric_multiplier_trainable_encoder_classifier_link_feat_extract_pretrain_polynomial_metric_order_number_of_steps_cbn_num_layers_repeat_polynomial_degrees_CIFAR100'
+% % 
+% % # MINIMAGENET RESULTS
+% % ROOT_DIR='/mnt/home/boris/experiments_task_encoder/180420_195022_mini_imagenet_metric_multiplier_trainable_encoder_classifier_link_feat_extract_pretrain_polynomial_metric_order_metric_multiplier_init_cbn_per_block_cbn_num_layers_repeat_final_experiment_polynomial_degrees_link_polynomial'
+% % ROOT_DIR='/mnt/home/boris/experiments_task_encoder/180421_113656_mini_imagenet_metric_multiplier_trainable_encoder_classifier_link_feat_extract_pretrain_polynomial_metric_order_metric_multiplier_init_cbn_per_block_cbn_num_layers_repeat_final_experiment_polynomial_degrees_link_cbn'
+%     \centering
+%     \begin{subfigure}[t]{0.49\textwidth}
+%         \includegraphics[width=\textwidth]{polynomial_degree_polynomial_MIN.png}
+%         \caption{Polynomial Euclidean. mini-Imagenet.}
+%         \label{fig:polynomial_euclidean_miniimagenet}
+%     \end{subfigure}
+%     \begin{subfigure}[t]{0.49\textwidth}
+%         \includegraphics[width=\textwidth]{polynomial_degree_polynomial_CIFAR100.png}
+%         \caption{Polynomial Euclidean. CIFAR100.}
+%         \label{fig:polynomial_euclidean_cifar100}
+%     \end{subfigure}
+%     \begin{subfigure}[t]{0.49\textwidth}
+%         \includegraphics[width=\textwidth]{polynomial_degree_cbn_MIN.png}
+%         \caption{Polynomial Euclidean with TBN. mini-Imagenet.}
+%         \label{fig:polynomial_euclidean_with_tbn_miniimagenet}
+%     \end{subfigure}
+%     \begin{subfigure}[t]{0.49\textwidth}
+%         \includegraphics[width=\textwidth]{polynomial_degree_cbn_CIFAR100.png}
+%         \caption{Polynomial Euclidean with TBN. CIFAR100.}
+%         \label{fig:polynomial_euclidean_with_tbn_cifar100}
+%     \end{subfigure}
+%     \caption{.}
+%     \label{fig:polynomial_metric_scaling}
+% \end{figure}
+
+
+\end{document}
+
+\citet{snell2017prototypical} found that the Euclidean distance performed better than the cosine distance used in \citet{vinyals2016matching}. We observed that this finding is mainly due to the fact that cosine distance, $\cos(\vec{a}, \vec{b}) = \frac{\vec{a}}{\lVert \vec{a} \rVert} \cdot \frac{\vec{b}}{\lVert \vec{b} \rVert}$, deprives the network from providing a scaling to the softmax through the magnitude of $\vec{a}$ and $\vec{b}$. Simply using the Euclidean distance solves this problem. However, assuming\footnote{Neural network initialization and batch norm encourages this regime.} that $\vec{a} \sim \mathcal{N}(0, I)$, $\E_a[\lVert \vec{a} \rVert_2] = \sqrt{D_f}$. This means that if $D_f$ is large, the network will have to work outside of it's normal regime to be able to scale down the feature representation. Hence, by introducing a learnable scale $\alpha$ after the distance function:
+\begin{align} \label{eqn:softmax_with_alpha}
+    p_{\phi, \alpha}(y=k|\vec{x}) = \frac{\exp(-\alpha \metric(f_{\phi}(\vec{x}), \vec{c}_k))}{\sum_{j} \exp(-\alpha \metric(f_{\phi}(\vec{x}), \vec{c}_j))},
+\end{align}
+we improve Euclidean distance and make cosine distance perform almost as well as the Euclidean one.
+
+To further understand the role of $\alpha$, we analyze the gradient of the cost function under the limits $\alpha \rightarrow 0$ and $\alpha \rightarrow \infty$ and cross-entropy loss $J_{k}(\phi,\alpha)$:
+\begin{align} \label{eqn:softmax_with_alpha_cost_by_class}
+    J_{k}(\phi,\alpha) = \sum_{\vec{x}_{i} \in \query{k}} \left[ \alpha \metric(f_{\phi}(\vec{x}_{i}), \vec{c}_k)  + \log \sum_{j} \exp(-\alpha \metric(f_{\phi}(\vec{x}_i), \vec{c}_j)) \right],
+\end{align}
+where $\query{k} = \{ (\vec{x}_i, y_i) \in \query{} : y_i = k \}$ is the \emph{query} set corresponding to the correct class. The full cost function is the sum of $J_{k}(\phi,\alpha)$ over $k$ an thus we concentrate the ensuing analysis on $J_{k}$. Deriving the per-class cost function with respect to $\phi$ yields:
+\begin{align} \label{eqn:softmax_with_alpha_total_derivative}
+    \frac{\partial}{\partial\phi}J_k(\phi,\alpha) &= \alpha \sum_{\vec{x}_{i} \in \query{k}} \left[ \frac{\partial}{\partial\phi} \metric(f_{\phi}(\vec{x}_{i}), \vec{c}_k)  - \frac{\sum_{j} \exp(-\alpha \metric(f_{\phi}(\vec{x}_i), \vec{c}_j)) \frac{\partial}{\partial\phi} \metric(f_{\phi}(\vec{x}_{i}), \vec{c}_j)}{\sum_{j} \exp(-\alpha \metric(f_{\phi}(\vec{x}_i), \vec{c}_j))} \right].
+\end{align}
+The effect of $\alpha$ on the expression of the derivative is thus twofold: an overall scaling and that of regulating the sharpness of weighting in the second term on the LHS, and a  more interesting effect that we explore in detail using limiting cases $\alpha \to 0$ and $\alpha \to \infty$. Since we are not interested in investigating the trivial scaling effect we normalize~\eqref{eqn:softmax_with_alpha_total_derivative} by $\alpha$.
