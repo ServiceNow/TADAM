@@ -8,6 +8,7 @@ import csv
 import os
 import sys
 
+import zipfile
 import numpy as np
 import scipy.misc
 
@@ -25,9 +26,11 @@ def main(data_dir, output_dir):
             # that split.
             reader = csv.DictReader(csv_file, delimiter=',')
             file_paths, labels = zip(
-                *((os.path.join(data_dir, row['filename']), row['label'])
+                *((os.path.join('images', row['filename']), row['label'])
                   for row in reader))
             all_labels = sorted(list(set(labels)))
+
+        archive = zipfile.ZipFile(os.path.join(data_dir, 'images.zip'), 'r')
 
         # Processing loop over examples
         features, targets = [], []
@@ -39,6 +42,7 @@ def main(data_dir, output_dir):
             sys.stdout.flush()
 
             # Load image in RGB mode to ensure image.ndim == 3
+            file_path = archive.open(file_path)
             image = scipy.misc.imread(file_path, mode='RGB')
 
             # Infer class from filename.
@@ -77,8 +81,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--data-dir', type=str,
-        default=os.path.join(
-            os.sep, 'mnt', 'datasets', 'public', 'mini-imagenet', 'raw-data'),
+        default=os.path.join(os.sep, 'mnt', 'datasets', 'public', 'mini-imagenet', 'raw-data'),
         help='Path to the raw data')
     parser.add_argument(
         '--output-dir', type=str, default=os.path.join(os.sep, 'mnt', 'datasets', 'public', 'mini-imagenet'),
