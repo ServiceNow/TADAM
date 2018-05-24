@@ -78,10 +78,10 @@ if __name__ == '__main__':
     parser.add_argument(
         '--data-dir', type=str,
         default=os.path.join(
-            os.sep, 'mnt', 'AIDATA', 'mini-imagenet', 'raw-data'),
+            os.sep, 'mnt', 'datasets', 'public', 'mini-imagenet', 'raw-data'),
         help='Path to the raw data')
     parser.add_argument(
-        '--output-dir', type=str, default='.',
+        '--output-dir', type=str, default=os.path.join(os.sep, 'mnt', 'datasets', 'public', 'mini-imagenet'),
         help='Output directory')
 
     args = parser.parse_args()
