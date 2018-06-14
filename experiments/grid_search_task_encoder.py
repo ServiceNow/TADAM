@@ -13,7 +13,7 @@ os.environ['LANG'] = 'en_CA.UTF-8'
 
 if __name__ == "__main__":
 
-    exp_description = "prototypical_5shot"
+    exp_description = "scale_crossvalidation_MIN"
 
     params = dict(
         repeat=list(range(0, 10)),  # used to repeate the same experiment
@@ -43,12 +43,12 @@ if __name__ == "__main__":
         feature_extractor='simple_res_net',
         activation='swish-1',  # ['relu', 'selu', 'swish-1']
         encoder_sharing='shared',  # ['shared', 'siamese'],
-        encoder_classifier_link=['cbn'],  # ['polynomial','prototypical','cosine', 'cbn'], 
+        encoder_classifier_link=['cbn', 'polynomial'],  # ['polynomial','prototypical','cosine', 'cbn'], 
         cbn_premultiplier='var',
         cbn_num_layers=[3],
         cbn_per_block=False,
         cbn_per_network=False,
-        metric_multiplier_init=1.0,  # [0.5, 1.0, 5.0, 7.5, 10.0, 20.0], 
+        metric_multiplier_init=[0.5, 1.0, 5.0, 7.5, 10.0, 20.0], 
         metric_multiplier_trainable=False,
         polynomial_metric_order=1,  # [1, 2, 3, 4, 5],  
         attention_fusion='sum',  # ['sum', 'highway', 'weighted'],
@@ -65,7 +65,7 @@ if __name__ == "__main__":
         lr_decay_rate=10.0,
         lr_anneal='pwc',
         fc_dropout=0.0,  # [None, 0.1, 0.2, 0.5],
-        feat_extract_pretrain=['multitask'],  # [None, 'finetune', 'freeze', 'multitask']
+        feat_extract_pretrain=['multitask', None],  # [None, 'finetune', 'freeze', 'multitask']
         feat_extract_pretrain_offset=15000,
         feat_extract_pretrain_decay_rate=0.9,  # TODO explore with more restarts [0.8, 0.9], seems like 0.8 better
         feat_extract_pretrain_decay_n=20,
