@@ -138,7 +138,7 @@ def get_arguments():
     parser.add_argument('--attention_fusion', type=str, default='sum', choices=['sum', 'highway', 'weighted'])
 
     parser.add_argument('--feature_extractor', type=str, default='simple_res_net',
-                        choices=['simple_conv_net', 'simple_res_net', 'res_net', 'dense_net', 'residense_net', 'res_net_34'], help='Which feature extractor to use')
+                        choices=['simple_conv_net', 'simple_res_net', 'res_net', 'residense_net', 'res_net_34'], help='Which feature extractor to use')
     # Feature extractor pretraining parameters (auxiliary 64-classification task)
     parser.add_argument('--feat_extract_pretrain', type=str, default=None,
                         choices=[None, 'finetune', 'freeze', 'multitask'], help='Whether or not pretrain the feature extractor')
@@ -183,11 +183,6 @@ def get_arguments():
     parser.add_argument('--cbn_per_block', type=bool, default=False)
     parser.add_argument('--cbn_per_network', type=bool, default=False)
     parser.add_argument('--cbn_after_shortcut', type=bool, default=False)
-
-    parser.add_argument('--densenet_depth', type=int, default=40)
-    parser.add_argument('--densenet_growth_rate', type=int, default=12)
-    parser.add_argument('--densenet_theta', type=float, default=0.5)
-    parser.add_argument('--conv_dropout', type=float, default=None)
 
     
     args = parser.parse_args()
@@ -359,87 +354,6 @@ def get_cbn_layer(h, beta, gamma):
     gamma = tf.reshape(gamma, [-1, 1, 1, beta.shape.as_list()[-1]])
 
     h = (gamma + 1.0) * h + beta
-    return h
-
-
-def add_dense_block(h, block_depth, growth_rate, flags, beta=None, gamma=None, is_training=False, reuse=None, scope='dense_block'):
-    conv2d_arg_scope, dropout_arg_scope = _get_scope(is_training, flags)
-    activation_fn = ACTIVATION_MAP[flags.activation]
-    with tf.variable_scope(scope, reuse=reuse):
-        with conv2d_arg_scope, dropout_arg_scope:
-            for i in range(block_depth):
-                h_previous=h
-                h = slim.conv2d(h, num_outputs=4*growth_rate, kernel_size=1, stride=1,
-                                scope='conv_1x1'+str(i), padding='SAME')
-                if flags.conv_dropout:
-                    h = slim.dropout(h, scope='conv_1x1dropout'+str(i), keep_prob=1.0 - flags.conv_dropout)
-                h = slim.conv2d(h, num_outputs=growth_rate, kernel_size=3, stride=1,
-                                activation_fn=None, # normalizer_fn=None, biases_initializer=None,
-                                scope='conv_3x3'+str(i), padding='SAME')
-                # conditional batch norm
-                if beta is not None and gamma is not None:
-                    with tf.variable_scope('conditional_batch_norm' + str(i), reuse=reuse):
-                        h = get_cbn_layer(h, beta=beta[i], gamma=gamma[i])
-                # activation
-                h = activation_fn(h, name='activation_' + str(i))
-                if flags.conv_dropout:
-                    h = slim.dropout(h, scope='conv_3x3dropout'+str(i), keep_prob=1.0 - flags.conv_dropout)
-                h = tf.concat([h_previous, h], name='concat_features'+str(i), axis=-1)
-    return h
-
-
-def add_transition(h, theta, flags, beta=None, gamma=None, is_last=False, is_training=False, reuse=None, scope='dense_transition'):
-    conv2d_arg_scope, dropout_arg_scope = _get_scope(is_training, flags)
-    activation_fn = ACTIVATION_MAP[flags.activation]
-    num_outputs = int(theta*h.get_shape().as_list()[-1])
-    with tf.variable_scope(scope, reuse=reuse):
-        with conv2d_arg_scope, dropout_arg_scope:
-            if is_last:
-                kernel_size = h.get_shape().as_list()[-2]
-                h = slim.avg_pool2d(h, kernel_size=kernel_size, scope='avg_pool')
-                h = slim.flatten(h)
-            else:
-                h = slim.conv2d(h, num_outputs=num_outputs, kernel_size=1, stride=1, activation_fn=None,
-                                scope='conv_1x1', padding='SAME')
-                # conditional batch norm
-                if beta is not None and gamma is not None:
-                    with tf.variable_scope('conditional_batch_norm', reuse=reuse):
-                        h = get_cbn_layer(h, beta=beta, gamma=gamma)
-                # activation
-                h = activation_fn(h, name='activation')
-                if flags.conv_dropout:
-                    h = slim.dropout(h, keep_prob=1.0 - flags.conv_dropout)
-                h = slim.avg_pool2d(h, kernel_size=2, stride=2, scope='avg_pool')
-    return h
-
-
-def build_dense_net(images, flags, beta=None, gamma=None, is_training=False, reuse=None, scope=None):
-    conv2d_arg_scope, dropout_arg_scope = _get_scope(is_training, flags)
-    # Divide by 2 because we use bottleneck
-    num_blocks=3
-    block_depth = int((flags.densenet_depth - 4) / (num_blocks*2))
-    with conv2d_arg_scope, dropout_arg_scope:
-        with tf.variable_scope(scope or 'feature_extractor', reuse=reuse):
-            # images = tf.add(images, -127.5, name='remove_mean')
-            # images = tf.div(images, 127.5, name='standardize')
-            # h = slim.conv2d(images, num_outputs=2*flags.densenet_growth_rate, kernel_size=3, stride=2,
-            #                 scope='conv_initial', padding='SAME')
-            h = images
-            for i in range(num_blocks):
-                # get conditional batch norm parameters
-                beta_block, gamma_block, beta_transition, gamma_transition = [None]*4
-                if beta is not None and gamma is not None:
-                    beta_block=beta[i,:-1]
-                    gamma_block=gamma[i,:-1]
-                    beta_transition = beta[i,-1]
-                    gamma_transition = gamma[i,-1]
-                # Dense - Block  1 and transition
-                h = add_dense_block(h, block_depth, flags.densenet_growth_rate, beta=beta_block, gamma=gamma_block,
-                                    flags=flags, is_training=is_training,
-                                    reuse=reuse, scope='dense_block_'+str(i))
-                h = add_transition(h, theta=flags.densenet_theta, beta=beta_transition, gamma=gamma_transition,
-                                   flags=flags, is_last=(i==num_blocks-1), is_training=is_training,
-                                   reuse=reuse, scope='dense_transition_'+str(i))
     return h
 
 
@@ -689,8 +603,6 @@ def build_feature_extractor_graph(images, flags, num_filters, beta=None, gamma=N
         h = build_simple_res_net(images, flags=flags, num_filters=num_filters, beta=beta, gamma=gamma, is_training=is_training, reuse=reuse, scope=scope)
     elif flags.feature_extractor == 'res_net':
         h = build_res_net(images, flags=flags, num_filters=num_filters, beta=beta, gamma=gamma, is_training=is_training, reuse=reuse, scope=scope)
-    elif flags.feature_extractor == 'dense_net':
-        h = build_dense_net(images, flags=flags, beta=beta, gamma=gamma, is_training=is_training, reuse=reuse, scope=scope)
     elif flags.feature_extractor == 'residense_net':
         h = build_residense_net(images, flags=flags, num_filters=num_filters, beta=beta, gamma=gamma, is_training=is_training, reuse=reuse, scope=scope)
     elif flags.feature_extractor == 'res_net_34':
@@ -1334,27 +1246,6 @@ def get_cbn_params(features_task_encode, num_filters_list, flags, reuse=False, i
 
     with tf.variable_scope(scope, reuse=reuse):
         h = tf.reduce_mean(features_task_encode, axis=1, keep_dims=False)
-        if flags.feature_extractor == 'dense_net':
-            num_blocks = 3
-            block_depth = int((flags.densenet_depth - 4) / (num_blocks * 2))
-            beta_reshape = [[None] * (block_depth+1) for _ in range(num_blocks)]
-            gamma_reshape = [[None] * (block_depth+1) for _ in range(num_blocks)]
-            num_filters_transition = int(2*flags.densenet_growth_rate)
-            for i in range(num_blocks):
-                for j in range(block_depth):
-                    if flags.cbn_per_block and j < (block_depth-1):
-                        beta, gamma = None, None
-                    else:
-                        beta, gamma = get_cbn_gamma_beta_net(h, i, j, num_filters=flags.densenet_growth_rate,
-                                                             flags=flags, is_training=is_training, reuse=reuse)
-                    beta_reshape[i][j] = beta
-                    gamma_reshape[i][j] = gamma
-                    num_filters_transition = num_filters_transition + flags.densenet_growth_rate
-                num_filters_transition = int(num_filters_transition * flags.densenet_theta)
-                beta, gamma = get_cbn_gamma_beta_net(h, i, j=block_depth, num_filters=num_filters_transition,
-                                                     flags=flags, is_training=is_training, reuse=reuse)
-                beta_reshape[i][block_depth] = beta
-                gamma_reshape[i][block_depth] = gamma
         if flags.feature_extractor == 'res_net_34':
             num_filters_list = [32, 64, 128, 256]
             num_blocks = [3, 4, 6, 3]
