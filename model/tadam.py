@@ -150,9 +150,6 @@ def get_arguments():
                         help='rate at which auxiliary few-shot task learning rate decays')
     parser.add_argument('--aux_lr_decay_n', type=float, default=None,
                         help='number of times auxiliary few-shot task learning rate decays')
-
-    parser.add_argument('--encoder_sharing', type=str, default='shared',
-                        choices=['shared', 'siamese'], help='How to link fetaure extractors in task encoder and classifier')
     parser.add_argument('--encoder_classifier_link', type=str, default='polynomial',
                         choices=['cbn', 'prototypical', 'std_normalized_euc_head',
                                  'cosine', 'polynomial', 'cbn_cos'],
@@ -818,52 +815,42 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                              num_filters=num_filters,
                                                              scope=feature_extractor_encoding_scope,
                                                              reuse=flags.feat_extract_pretrain is not None)
-        if flags.encoder_sharing == 'shared':
-            ecoder_reuse = True
-            feature_extractor_classifier_scope = feature_extractor_encoding_scope
-        elif flags.encoder_sharing == 'siamese':
-            # TODO: in the case of pretrained feature extractor this is not good,
-            # because the classfier part will be randomly initialized
-            ecoder_reuse = False
-            feature_extractor_classifier_scope = 'feature_extractor_classifier'
-        else:
-            raise Exception('Option not implemented')
-
+        
         if flags.encoder_classifier_link=='prototypical':
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags, is_training=is_training, reuse=reuse)
             features_generic = build_feature_extractor_graph(images=images_deploy_pl, flags=flags,
                                                              is_training=is_training,
-                                                             scope=feature_extractor_classifier_scope,
+                                                             scope=feature_extractor_encoding_scope,
                                                              num_filters=num_filters,
-                                                             reuse=ecoder_reuse)
+                                                             reuse=True)
             logits = build_prototypical_head(features_generic, task_encoding, flags, is_training=is_training)
         elif flags.encoder_classifier_link=='cosine':
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags, is_training=is_training, reuse=reuse)
             features_generic = build_feature_extractor_graph(images=images_deploy_pl, flags=flags,
                                                              is_training=is_training,
-                                                             scope=feature_extractor_classifier_scope,
+                                                             scope=feature_extractor_encoding_scope,
                                                              num_filters=num_filters,
-                                                             reuse=ecoder_reuse)
+                                                             reuse=True)
             logits = build_cosine_head(features_generic, task_encoding, flags, is_training=is_training)
         elif flags.encoder_classifier_link=='polynomial':
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags, is_training=is_training, reuse=reuse)
             features_generic = build_feature_extractor_graph(images=images_deploy_pl, flags=flags,
                                                              is_training=is_training,
-                                                             scope=feature_extractor_classifier_scope,
+                                                             scope=feature_extractor_encoding_scope,
                                                              num_filters=num_filters,
-                                                             reuse=ecoder_reuse)
+                                                             reuse=True)
             logits = build_polynomial_head(features_generic, task_encoding, flags, is_training=is_training)
         elif flags.encoder_classifier_link=='std_normalized_euc_head':
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags, is_training=is_training, reuse=reuse)
             features_generic = build_feature_extractor_graph(images=images_deploy_pl, flags=flags,
                                                              is_training=is_training,
-                                                             scope=feature_extractor_classifier_scope,
+                                                             scope=feature_extractor_encoding_scope,
                                                              num_filters=num_filters,
-                                                             reuse=ecoder_reuse)
+                                                             reuse=True)
             logits = build_std_normalized_head(features_generic, task_encoding, flags, is_training=is_training)
         elif flags.encoder_classifier_link == 'cbn':
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
@@ -877,8 +864,8 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                                  is_training=is_training,
                                                                  num_filters=num_filters,
                                                                  gamma=gamma, beta=beta,
-                                                                 scope=feature_extractor_classifier_scope,
-                                                                 reuse=ecoder_reuse)
+                                                                 scope=feature_extractor_encoding_scope,
+                                                                 reuse=True)
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags, is_training=is_training, reuse=reuse)
 
@@ -886,8 +873,8 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                              is_training=is_training,
                                                              num_filters=num_filters,
                                                              gamma=gamma, beta=beta,
-                                                             scope=feature_extractor_classifier_scope,
-                                                             reuse=ecoder_reuse)
+                                                             scope=feature_extractor_encoding_scope,
+                                                             reuse=True)
             logits = build_polynomial_head(features_generic, task_encoding, flags, is_training=is_training)
         elif flags.encoder_classifier_link == 'cbn_cos':
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
@@ -901,8 +888,8 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                                  is_training=is_training,
                                                                  num_filters=num_filters,
                                                                  gamma=gamma, beta=beta,
-                                                                 scope=feature_extractor_classifier_scope,
-                                                                 reuse=ecoder_reuse)
+                                                                 scope=feature_extractor_encoding_scope,
+                                                                 reuse=True)
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                       flags=flags, is_training=is_training, reuse=reuse)
 
@@ -910,8 +897,8 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                              is_training=is_training,
                                                              num_filters=num_filters,
                                                              gamma=gamma, beta=beta,
-                                                             scope=feature_extractor_classifier_scope,
-                                                             reuse=ecoder_reuse)
+                                                             scope=feature_extractor_encoding_scope,
+                                                             reuse=True)
             logits = build_cosine_head(features_generic, task_encoding, flags, is_training=is_training)
         else:
             raise Exception('Option not implemented')

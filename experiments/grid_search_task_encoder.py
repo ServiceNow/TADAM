@@ -41,7 +41,6 @@ if __name__ == "__main__":
         number_of_steps=[30000, 60000],  # [5 * 5200, 3 * 5200],
         feature_extractor='simple_res_net',
         activation='swish-1',  # ['relu', 'selu', 'swish-1']
-        encoder_sharing='shared',  # ['shared', 'siamese'],
         encoder_classifier_link=['cbn', 'polynomial'],  # ['polynomial','prototypical','cosine', 'cbn'], 
         cbn_num_layers=[3],
         cbn_per_block=False,
