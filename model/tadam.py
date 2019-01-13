@@ -138,7 +138,7 @@ def get_arguments():
     parser.add_argument('--attention_fusion', type=str, default='sum', choices=['sum', 'highway', 'weighted'])
 
     parser.add_argument('--feature_extractor', type=str, default='simple_res_net',
-                        choices=['simple_conv_net', 'simple_res_net', 'res_net', 'residense_net', 'res_net_34'], help='Which feature extractor to use')
+                        choices=['simple_conv_net', 'simple_res_net'], help='Which feature extractor to use')
     # Feature extractor pretraining parameters (auxiliary 64-classification task)
     parser.add_argument('--feat_extract_pretrain', type=str, default=None,
                         choices=[None, 'finetune', 'freeze', 'multitask'], help='Whether or not pretrain the feature extractor')
@@ -357,61 +357,6 @@ def get_cbn_layer(h, beta, gamma):
     return h
 
 
-def build_res_net(images, flags, num_filters, beta=None, gamma=None, is_training=False, reuse=None, scope=None):
-    conv2d_arg_scope, dropout_arg_scope = _get_scope(is_training, flags)
-    activation_fn = ACTIVATION_MAP[flags.activation]
-    with conv2d_arg_scope, dropout_arg_scope:
-        with tf.variable_scope(scope or 'feature_extractor', reuse=reuse):
-            # h = slim.conv2d(images, num_outputs=num_filters[0], kernel_size=3, stride=1,
-            #                 scope='conv_input', padding='SAME', activation_fn=activation_fn)
-            # h = slim.max_pool2d(h, kernel_size=2, stride=2, padding='SAME', scope='max_pool_input')
-            h = images
-            for i in range(len(num_filters)):
-
-                for j in range(flags.num_units_in_block):
-                    # make shortcut
-                    shortcut = slim.conv2d(h, num_outputs=4 * num_filters[i], kernel_size=1, stride=1,
-                                           activation_fn=None, scope='shortcut' + str(i) + str(j), padding='SAME')
-                    # bottleneck
-                    h = slim.conv2d(h, num_outputs=num_filters[i], kernel_size=1, stride=1,
-                                    scope='conv_1x1_d' + str(i) + '_' + str(j), padding='SAME', activation_fn=activation_fn)
-                    h = slim.conv2d(h, num_outputs=num_filters[i], kernel_size=3, stride=1,
-                                    scope='conv_3x3_d' + str(i) + '_' + str(j), padding='SAME', activation_fn=activation_fn)
-                    h = slim.conv2d(h, num_outputs=4*num_filters[i], kernel_size=1, stride=1,
-                                    scope='conv_1x1_4d' + str(i) + '_' + str(j), padding='SAME', activation_fn=None)
-                    # add shortcut
-                    h = tf.add(h, shortcut, name='add_shortcut' + str(i) + str(j))
-                    # conditional batch norm
-                    if beta is not None and gamma is not None:
-                        with tf.variable_scope('conditional_batch_norm' + str(i) + '_' + str(j), reuse=reuse):
-                            h = get_cbn_layer(h, beta=beta[i, j], gamma=gamma[i, j])
-                    # activation
-                    h = activation_fn(h, name='activation_' + str(i) + '_' + str(j))
-
-                h = slim.max_pool2d(h, kernel_size=2, stride=2, padding='SAME', scope='max_pool' + str(i))
-
-            if flags.feature_expansion_size:
-                if flags.feature_dropout_p:
-                    h = slim.dropout(h, scope='feature_expansion_dropout', keep_prob=1.0 - flags.feature_dropout_p)
-                h = slim.conv2d(slim.dropout(h), num_outputs=flags.feature_expansion_size, kernel_size=1, stride=1,
-                                scope='feature_expansion', padding='SAME')
-
-            if flags.embedding_pooled == True:
-                kernel_size = h.shape.as_list()[-2]
-                h = slim.avg_pool2d(h, kernel_size=kernel_size, scope='avg_pool')
-            h = slim.flatten(h)
-
-            if flags.feature_dropout_p:
-                h = slim.dropout(h, scope='feature_bottleneck_dropout', keep_prob=1.0 - flags.feature_dropout_p)
-            # Bottleneck layer
-            if flags.feature_bottleneck_size:
-                h = slim.fully_connected(h, num_outputs=flags.feature_bottleneck_size,
-                                         activation_fn=activation_fn, normalizer_fn=None,
-                                         scope='feature_bottleneck')
-
-    return h
-
-
 def build_simple_res_net(images, flags, num_filters, beta=None, gamma=None, is_training=False, reuse=None, scope=None):
     conv2d_arg_scope, dropout_arg_scope = _get_scope(is_training, flags)
     activation_fn = ACTIVATION_MAP[flags.activation]
@@ -470,143 +415,11 @@ def build_simple_res_net(images, flags, num_filters, beta=None, gamma=None, is_t
     return h
 
 
-def get_res_net_block(h, flags, num_filters, num_units, pool=False, beta=None, gamma=None, is_training=False, reuse=None, scope=None):
-    conv2d_arg_scope, dropout_arg_scope = _get_scope(is_training, flags)
-    activation_fn = ACTIVATION_MAP[flags.activation]
-    with conv2d_arg_scope, dropout_arg_scope:
-        with tf.variable_scope(scope, reuse=reuse):
-            # make shortcut
-            shortcut = slim.conv2d(h, num_outputs=num_filters, kernel_size=1, stride=1,
-                                   activation_fn=None,
-                                   scope='shortcut', padding='SAME')
-
-            for j in range(num_units):
-                h = slim.conv2d(h, num_outputs=num_filters, kernel_size=3, stride=1,
-                                scope='conv_'+str(j), padding='SAME', activation_fn=None)
-                if flags.conv_dropout:
-                    h = slim.dropout(h, keep_prob=1.0 - flags.conv_dropout)
-                if beta is not None and gamma is not None and not flags.cbn_after_shortcut:
-                    with tf.variable_scope('conditional_batch_norm_' + str(j), reuse=reuse):
-                        h = get_cbn_layer(h, beta=beta[j], gamma=gamma[j])
-                if j < (num_units - 1):
-                    h = activation_fn(h, name='activation_' + str(j))
-            h = h + shortcut
-            if beta is not None and gamma is not None and flags.cbn_after_shortcut:
-                with tf.variable_scope('conditional_batch_norm_' + str(j), reuse=reuse):
-                    h = get_cbn_layer(h, beta=beta[j], gamma=gamma[j])
-
-            h = activation_fn(h, name='activation_' + '_' + str(flags.num_units_in_block - 1))
-            if pool:
-                h = slim.max_pool2d(h, kernel_size=2, stride=2, padding='SAME', scope='max_pool')
-    return h
-
-
-def build_res_net_34(images, flags, beta=None, gamma=None, is_training=False, reuse=None, scope=None):
-    """
-    Implementing architechture from https://arxiv.org/pdf/1706.00326.pdf
-
-    :param images:
-    :param flags:
-    :param num_filters:
-    :param beta:
-    :param gamma:
-    :param is_training:
-    :param reuse:
-    :param scope:
-    :return:
-    """
-    num_filters = [32, 64, 128, 256]
-    num_blocks = [3, 4, 6, 3]
-    conv2d_arg_scope, dropout_arg_scope = _get_scope(is_training, flags)
-    with conv2d_arg_scope, dropout_arg_scope:
-        with tf.variable_scope(scope or 'feature_extractor', reuse=reuse):
-            # h = slim.conv2d(images, num_outputs=num_filters[0], kernel_size=5, stride=2,
-            #                 scope='conv_input', padding='SAME')
-            h = images
-            block_id=0
-            for i in range(len(num_filters)):
-                for block in range(num_blocks[i]):
-                    if beta is not None and gamma is not None:
-                        beta_block, gamma_block = beta[block_id], gamma[block_id]
-                    else:
-                        beta_block, gamma_block = None, None
-                    h = get_res_net_block(h, flags, num_filters[i], num_units=2, pool=block==(num_blocks[i]-1),
-                                          beta=beta_block, gamma=gamma_block,
-                                          is_training=is_training, reuse=reuse, scope='block_'+str(num_filters[i])+'_'+str(block))
-                    block_id += 1
-
-            if flags.embedding_pooled == True:
-                kernel_size = h.shape.as_list()[-2]
-                h = slim.avg_pool2d(h, kernel_size=kernel_size, scope='avg_pool')
-            h = slim.flatten(h)
-
-    return h
-
-
-
-def build_residense_net(images, flags, num_filters, beta=None, gamma=None, is_training=False, reuse=None, scope=None):
-    conv2d_arg_scope, dropout_arg_scope = _get_scope(is_training, flags)
-    activation_fn = ACTIVATION_MAP[flags.activation]
-    with conv2d_arg_scope, dropout_arg_scope:
-        with tf.variable_scope(scope or 'feature_extractor', reuse=reuse):
-            h_residense = []
-            for i in range(len(num_filters)):
-                if i==0:
-                    h = images
-                else:
-                    h = h_residense
-                # make shortcut
-                shortcut = slim.conv2d(h, num_outputs=num_filters[i], kernel_size=1, stride=1,
-                                       activation_fn=None,
-                                       scope='shortcut' + str(i), padding='SAME')
-
-                for j in range(flags.num_units_in_block):
-                    h = slim.conv2d(h, num_outputs=num_filters[i], kernel_size=3, stride=1,
-                                    scope='conv' + str(i) + '_' + str(j), padding='SAME', activation_fn=None)
-                    if flags.conv_dropout:
-                        h = slim.dropout(h, keep_prob=1.0 - flags.conv_dropout)
-                    if beta is not None and gamma is not None and not flags.cbn_after_shortcut:
-                        with tf.variable_scope('conditional_batch_norm'+ str(i) + '_' + str(j), reuse=reuse):
-                            h = get_cbn_layer(h, beta=beta[i,j], gamma=gamma[i,j])
-
-                    if j < (flags.num_units_in_block - 1):
-                        h = activation_fn(h, name='activation_' + str(i) + '_' + str(j))
-                h = h + shortcut
-                if beta is not None and gamma is not None and flags.cbn_after_shortcut:
-                    with tf.variable_scope('conditional_batch_norm' + str(i) + '_' + str(j), reuse=reuse):
-                        h = get_cbn_layer(h, beta=beta[i, j], gamma=gamma[i, j])
-
-                h = activation_fn(h, name='activation_' + str(i) + '_' + str(flags.num_units_in_block - 1))
-                h = slim.max_pool2d(h, kernel_size=2, stride=2, padding='SAME', scope='max_pool' + str(i))
-
-                if i > 0:
-                    h_residense = slim.avg_pool2d(h_residense, kernel_size=3, stride=2, padding='SAME', scope='residense_pool' + str(i))
-                    h_residense = tf.concat([h_residense, h], axis=-1, name='append_previous_stack_input')
-                else:
-                    h_residense = h
-
-            if flags.embedding_pooled == True:
-                kernel_size = h_residense.shape.as_list()[-2]
-                h_residense = slim.avg_pool2d(h_residense, kernel_size=kernel_size, scope='avg_pool')
-            h_residense = slim.flatten(h_residense)
-
-            gamma = tf.Variable(np.ones(shape=(h_residense.shape.as_list()[-1],), dtype=np.float32),
-                                trainable=is_training, name='scale', dtype=tf.float32)
-            h_residense = tf.multiply(h_residense, gamma, name='output_scaling')
-    return h_residense
-
-
 def build_feature_extractor_graph(images, flags, num_filters, beta=None, gamma=None, is_training=False, scope='feature_extractor_task_encoder', reuse=None, is_64way=False):
     if flags.feature_extractor == 'simple_conv_net':
         h = build_simple_conv_net(images, flags=flags, is_training=is_training, reuse=reuse, scope=scope)
     elif flags.feature_extractor == 'simple_res_net':
         h = build_simple_res_net(images, flags=flags, num_filters=num_filters, beta=beta, gamma=gamma, is_training=is_training, reuse=reuse, scope=scope)
-    elif flags.feature_extractor == 'res_net':
-        h = build_res_net(images, flags=flags, num_filters=num_filters, beta=beta, gamma=gamma, is_training=is_training, reuse=reuse, scope=scope)
-    elif flags.feature_extractor == 'residense_net':
-        h = build_residense_net(images, flags=flags, num_filters=num_filters, beta=beta, gamma=gamma, is_training=is_training, reuse=reuse, scope=scope)
-    elif flags.feature_extractor == 'res_net_34':
-        h = build_res_net_34(images, flags=flags, beta=beta, gamma=gamma, is_training=is_training, reuse=reuse, scope=scope)
     else:
         h = None
 
@@ -1239,46 +1052,22 @@ def get_cbn_params(features_task_encode, num_filters_list, flags, reuse=False, i
     :param scope:
     :return:
     """
-    if flags.feature_extractor == 'res_net':
-        num_filters_modifier = 4
-    else:
-        num_filters_modifier = 1
 
     with tf.variable_scope(scope, reuse=reuse):
         h = tf.reduce_mean(features_task_encode, axis=1, keep_dims=False)
-        if flags.feature_extractor == 'res_net_34':
-            num_filters_list = [32, 64, 128, 256]
-            num_blocks = [3, 4, 6, 3]
-            num_units_in_block = 2
-
-            beta_reshape = [[None] * num_units_in_block for _ in range(np.sum(num_blocks))]
-            gamma_reshape = [[None] * num_units_in_block for _ in range(np.sum(num_blocks))]
-
-            block_id = 0
-            for i, num_filters in enumerate(num_filters_list):
-                for b in range(num_blocks[i]):
-                    for j in range(num_units_in_block):
-                        if flags.cbn_per_block and (j < (num_units_in_block-1) or (b < (num_blocks[i]-1))):
-                            beta, gamma = None, None
-                        else:
-                            beta, gamma = get_cbn_gamma_beta_net(h, block_id, j, num_filters=num_filters, flags=flags, is_training=is_training, reuse=reuse)
-                        beta_reshape[block_id][j] = beta
-                        gamma_reshape[block_id][j] = gamma
-                    block_id += 1
-        else:
-            beta_reshape = [[None] * flags.num_units_in_block for _ in range(len(num_filters_list))]
-            gamma_reshape = [[None] * flags.num_units_in_block for _ in range(len(num_filters_list))]
-            for i, num_filters in enumerate(num_filters_list):
-                for j in range(flags.num_units_in_block):
-                    if flags.cbn_per_block and j < (flags.num_units_in_block-1):
-                        beta, gamma = None, None
-                    elif flags.cbn_per_network and (j < (flags.num_units_in_block-1) or i < (len(num_filters_list)-1)):
-                        beta, gamma = None, None
-                    else:
-                        beta, gamma = get_cbn_gamma_beta_net(h, i, j, num_filters=num_filters*num_filters_modifier, flags=flags, is_training=is_training, reuse=reuse)
-                    beta_reshape[i][j] = beta
-                    gamma_reshape[i][j] = gamma
-        return np.asarray(gamma_reshape), np.asarray(beta_reshape)
+        beta_reshape = [[None] * flags.num_units_in_block for _ in range(len(num_filters_list))]
+        gamma_reshape = [[None] * flags.num_units_in_block for _ in range(len(num_filters_list))]
+        for i, num_filters in enumerate(num_filters_list):
+            for j in range(flags.num_units_in_block):
+                if flags.cbn_per_block and j < (flags.num_units_in_block-1):
+                    beta, gamma = None, None
+                elif flags.cbn_per_network and (j < (flags.num_units_in_block-1) or i < (len(num_filters_list)-1)):
+                    beta, gamma = None, None
+                else:
+                    beta, gamma = get_cbn_gamma_beta_net(h, i, j, num_filters=num_filters, flags=flags, is_training=is_training, reuse=reuse)
+                beta_reshape[i][j] = beta
+                gamma_reshape[i][j] = gamma
+    return np.asarray(gamma_reshape), np.asarray(beta_reshape)
 
 
 def get_attention_layer(features_generic, task_encoding, flags, is_training=False):
