@@ -27,7 +27,6 @@ if __name__ == "__main__":
         num_shots_train=[5],  # [3, 5, 10],
         num_shots_test=5,
         optimizer='sgd',  # ['sgd', 'adam']
-        gradient_noise=1.0,
         sqrt_noise_anneal=False,
         num_units_in_block=3,
         num_blocks=4,
@@ -51,16 +50,8 @@ if __name__ == "__main__":
         metric_multiplier_init=[0.5, 1.0, 5.0, 7.5, 10.0, 20.0], 
         metric_multiplier_trainable=False,
         polynomial_metric_order=1,  # [1, 2, 3, 4, 5],  
-        attention_fusion='sum',  # ['sum', 'highway', 'weighted'],
-        attention_no_original_embedding=True,
         dropout=1.0,
-        class_embed_size=None,  # 32
-        attention_num_filters=128,  # [64, 128]
-        task_encoder='class_mean',  # ['talkthrough', 'class_mean', 'label_embed', 'self_attention']
-        num_self_attention_splits=4,
         weights_initializer_factor=0.1,
-        num_attention_models=16,  # [8, 16]
-        num_attention_layers=1,
         n_lr_decay=3,
         lr_decay_rate=10.0,
         lr_anneal='pwc',
@@ -75,7 +66,6 @@ if __name__ == "__main__":
         feature_bottleneck_size=None,
         feature_expansion_size=None,
         num_classes_pretrain=64,
-        task_encoder_sharing=None,
         aux_num_classes_test=10,
         aux_num_shots=1,
         aux_decay_rate=None,  # 0.9

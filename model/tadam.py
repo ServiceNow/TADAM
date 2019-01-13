@@ -111,7 +111,7 @@ def get_arguments():
     parser.add_argument('--num_cases_test', type=int, default=50000,
                         help='Number of few-shot cases to compute test accuracy')
     parser.add_argument('--pretrained_model_dir', type=str,
-                        default='./logs/batch_size-32-num_tasks_per_batch-1-lr-0.122-lr_anneal-cos-epochs-100.0-dropout-1.0-optimizer-sgd-weight_decay-0.0005-augment-False-num_filters-64-feature_extractor-simple_res_net-task_encoder-class_mean-attention_num_filters-32/train',
+                        default='./logs/batch_size-32-num_tasks_per_batch-1-lr-0.122-lr_anneal-cos-epochs-100.0-dropout-1.0-optimizer-sgd-weight_decay-0.0005-augment-False-num_filters-64-feature_extractor-simple_res_net/train',
                         help='Path to the pretrained model to run the nearest neigbor baseline test.')
     # Architecture parameters
     parser.add_argument('--dropout', type=float, default=1.0)
@@ -124,19 +124,9 @@ def get_arguments():
     parser.add_argument('--num_max_pools', type=int, default=3)
     parser.add_argument('--block_size_growth', type=float, default=2.0)
     parser.add_argument('--activation', type=str, default='swish-1', choices=['relu', 'selu', 'swish-1'])
-
     parser.add_argument('--feature_dropout_p', type=float, default=None)
     parser.add_argument('--feature_expansion_size', type=int, default=None)
     parser.add_argument('--feature_bottleneck_size', type=int, default=None)
-    parser.add_argument('--class_embed_size', type=int, default=None)
-    parser.add_argument('--task_encoder_sharing', default=None, choices=['global', 'layer', None])
-    parser.add_argument('--attention_num_filters', type=int, default=64)
-    parser.add_argument('--attention_no_original_embedding', type=bool, default=True,
-                        help='Whether to keep the original feature extractor embedding when feeding the final FC layer')
-    parser.add_argument('--num_attention_models', type=int, default=6)
-    parser.add_argument('--num_attention_layers', type=int, default=2)
-    parser.add_argument('--attention_fusion', type=str, default='sum', choices=['sum', 'highway', 'weighted'])
-
     parser.add_argument('--feature_extractor', type=str, default='simple_res_net',
                         choices=['simple_conv_net', 'simple_res_net'], help='Which feature extractor to use')
     # Feature extractor pretraining parameters (auxiliary 64-classification task)
@@ -164,19 +154,14 @@ def get_arguments():
     parser.add_argument('--encoder_sharing', type=str, default='shared',
                         choices=['shared', 'siamese'], help='How to link fetaure extractors in task encoder and classifier')
     parser.add_argument('--encoder_classifier_link', type=str, default='polynomial',
-                        choices=['attention', 'cbn', 'prototypical', 'std_normalized_euc_head', 'self_attention_euclidian',
-                                 'cosine', 'polynomial', 'perceptron', 'cbn_cos'],
+                        choices=['cbn', 'prototypical', 'std_normalized_euc_head',
+                                 'cosine', 'polynomial', 'cbn_cos'],
                         help='How to link fetaure extractors in task encoder and classifier')
     parser.add_argument('--embedding_pooled', type=bool, default=True,
                         help='Whether to use avg pooling to create embedding')
-    parser.add_argument('--task_encoder', type=str, default='class_mean', choices=['talkthrough', 'class_mean', 'label_embed', 'self_attention'])
-    parser.add_argument('--num_self_attention_splits', type=int, default=1)
-
     parser.add_argument('--metric_multiplier_init', type=float, default=1.0, help='multiplier of cosine metric')
     parser.add_argument('--metric_multiplier_trainable', type=bool, default=False, help='multiplier of cosine metric trainability')
     parser.add_argument('--polynomial_metric_order', type=int, default=1)
-    parser.add_argument('--perceptron_metric_filters', type=int, default=64)
-    parser.add_argument('--perceptron_metric_layers', type=int, default=2)
 
     parser.add_argument('--cbn_premultiplier', type=str, default='var', choices=['var', 'projection'])
     parser.add_argument('--cbn_num_layers', type=int, default=3)
@@ -207,7 +192,6 @@ def get_logdir_name(flags):
                   'dropout', str(flags.dropout), 'opt', flags.optimizer,
                   'weight_decay', str(flags.weight_decay),
                   'nfilt', str(flags.num_filters), 'feature_extractor', str(flags.feature_extractor),
-                  'task_encoder', str(flags.task_encoder), 'att_nfilt', str(flags.attention_num_filters),
                   'enc_cl_link', flags.encoder_classifier_link]
 
     if flags.log_dir == '':
@@ -411,7 +395,6 @@ def build_simple_res_net(images, flags, num_filters, beta=None, gamma=None, is_t
                 h = slim.fully_connected(h, num_outputs=flags.feature_bottleneck_size,
                                          activation_fn=activation_fn, normalizer_fn = None,
                                          scope='feature_bottleneck')
-
     return h
 
 
@@ -430,7 +413,6 @@ def build_feature_extractor_graph(images, flags, num_filters, beta=None, gamma=N
     else:
         h = tf.reshape(h, shape=(1, embedding_shape[0], -1),
                                       name='reshape_to_separate_tasks_generic_features')
-
     return h
 
 
@@ -439,181 +421,17 @@ def build_task_encoder(embeddings, labels, flags, is_training, reuse=None, scope
 
     with conv2d_arg_scope, dropout_arg_scope:
         with tf.variable_scope(scope, reuse=reuse):
-            
-            if flags.task_encoder == 'talkthrough':
-                task_encoding = embeddings
-            elif flags.task_encoder == 'class_mean':
-                embedding_shape = embeddings.get_shape().as_list()
-                if flags.class_embed_size and not flags.encoder_classifier_link == 'prototypical':
-                    # TODO: make sure that this is acceptable to include flags.num_classes_train
-                    vocab_size = max(flags.num_classes_test, flags.aux_num_classes_test, flags.num_classes_train)
-                    position_encoding = slim.embed_sequence(ids=labels,
-                                                            vocab_size=vocab_size, embed_dim=flags.class_embed_size,
-                                                            unique=True,
-                                                            trainable=is_training, scope='class_embedding', reuse=reuse)
-                    position_encoding = tf.reshape(position_encoding,
-                                                   shape=(embedding_shape[0], embedding_shape[1], -1))
-                    task_encoding = tf.concat([embeddings, position_encoding], axis=len(embedding_shape) - 1)
-                else:
-                    task_encoding = embeddings
-
-                if is_training:
-                    task_encoding = tf.reshape(task_encoding, shape=(flags.num_tasks_per_batch, flags.num_classes_train, flags.num_shots_train, -1),
-                                               name='reshape_to_separate_tasks_task_encoding')
-                else:
-                    task_encoding = tf.reshape(task_encoding, shape=(1, flags.num_classes_test, flags.num_shots_test, -1),
-                                               name='reshape_to_separate_tasks_task_encoding')
-                task_encoding = tf.reduce_mean(task_encoding, axis=2, keep_dims=False)
-
-            elif flags.task_encoder == 'label_embed':
-                embedding_shape = embeddings.get_shape().as_list()
-                if flags.class_embed_size:
-                    # TODO: make sure that this is acceptable to include flags.num_classes_train
-                    vocab_size = max(flags.num_classes_test, flags.aux_num_classes_test, flags.num_classes_train)
-                    position_encoding = slim.embed_sequence(ids=labels,
-                           vocab_size=vocab_size, embed_dim=flags.class_embed_size, unique=True,
-                           trainable=is_training, scope='class_embedding', reuse=reuse)
-                    position_encoding = tf.reshape(position_encoding, shape=(embedding_shape[0], embedding_shape[1], -1))
-                    task_encoding = tf.concat([embeddings, position_encoding], axis=len(embedding_shape) - 1)
-                else:
-                    task_encoding = embeddings
-
-            elif flags.task_encoder == 'self_attention':
-                task_encoding = build_feature_customizer_attention(features_generic=embeddings,
-                                                               task_encoding=embeddings,
-                                                               flags=flags, is_training=is_training, reuse=reuse,
-                                                               scope='self_attention')
-                if is_training:
-                    task_encoding = tf.reshape(task_encoding, shape=(flags.num_tasks_per_batch, flags.num_classes_train, flags.num_shots_train, -1),
-                                               name='reshape_to_separate_tasks_task_encoding')
-                else:
-                    task_encoding = tf.reshape(task_encoding, shape=(1, flags.num_classes_test, flags.num_shots_test, -1),
-                                               name='reshape_to_separate_tasks_task_encoding')
-                task_encoding = tf.reduce_mean(task_encoding, axis=2, keep_dims=False)
+            embedding_shape = embeddings.get_shape().as_list()
+            task_encoding = embeddings
+            if is_training:
+                task_encoding = tf.reshape(task_encoding, 
+                                           shape=(flags.num_tasks_per_batch, flags.num_classes_train, flags.num_shots_train, -1),
+                                           name='reshape_to_separate_tasks_task_encoding')
             else:
-                task_encoding = None
-
+                task_encoding = tf.reshape(task_encoding, shape=(1, flags.num_classes_test, flags.num_shots_test, -1),
+                                           name='reshape_to_separate_tasks_task_encoding')
+            task_encoding = tf.reduce_mean(task_encoding, axis=2, keep_dims=False)
             return task_encoding
-
-
-
-def build_feature_customizer(features_generic, task_encoding, flags, is_training, reuse, scope='feature_customizer'):
-
-    if flags.feature_customizer == 'attention':
-        customized_features = build_feature_customizer_attention(features_generic, task_encoding, flags, is_training, reuse,
-                                           scope=scope)
-    elif flags.feature_customizer == 'talkthrough':
-        customized_features = features_generic
-    else:
-        customized_features = None
-
-    return customized_features
-
-
-def build_feature_customizer_attention(features_generic, task_encoding, flags, is_training, reuse, scope='feature_customizer'):
-    conv2d_arg_scope, dropout_arg_scope = _get_scope(is_training, flags)
-    activation_fn = ACTIVATION_MAP[flags.activation]
-
-    features_generic_shape = features_generic.get_shape().as_list()
-    with conv2d_arg_scope, dropout_arg_scope:
-        with tf.variable_scope(scope, reuse=reuse):
-            if len(features_generic_shape) == 2:
-                features_generic = tf.expand_dims(features_generic, axis=0)
-            if len(task_encoding.get_shape().as_list()) == 2:
-                task_encoding = tf.expand_dims(task_encoding, axis=0)
-
-            # This is based on [1] Bohdanau 2014 and [2] https://arxiv.org/pdf/1703.10089.pdf
-            # i is the number of steps in the task_encoding sequence
-            # j is the number of steps in the features_generic sequence
-            j = task_encoding.get_shape().as_list()[1]
-            i = features_generic.get_shape().as_list()[1]
-
-            # tile to be able to produce weight matrix alpha in (i,j) space
-            features_generic = tf.expand_dims(features_generic, axis=2)
-            task_encoding = tf.expand_dims(task_encoding, axis=1)
-            # features_generic changes over i and is constant over j
-            # task_encoding changes over j and is constant over i
-            task_encoding_tile = tf.tile(task_encoding, (1, i, 1, 1))
-            features_generic_tile = tf.tile(features_generic, (1, 1, j, 1))
-
-            # Transformaition layers, eq. (3) in [2]
-            features_generic_wa = slim.conv2d(features_generic_tile, num_outputs=flags.attention_num_filters, kernel_size=1, stride=1,
-                                              activation_fn=None, scope='attention/Wa')
-            task_encoding_ua = slim.conv2d(task_encoding_tile, flags.attention_num_filters, kernel_size=1, stride=1,
-                                              activation_fn=None, scope='attention/Ua')
-
-            # apply addition and tanh nonlinearity in equation 3 in [2]
-            seq_concat = tf.add(task_encoding_ua, features_generic_wa, name='add_wa_ua_eq_3')
-            # seq_concat = tf.tanh(seq_concat, name='tanh')
-            seq_concat = activation_fn(seq_concat, name='activation')
-            # apply multiplication by va in equation 3 in [2]
-            e = slim.conv2d(seq_concat, num_outputs=1, kernel_size=1, stride=1,
-                        scope='multiply_by_va', padding='SAME', activation_fn=None, normalizer_fn=None)
-            # apply softmax and get alpha from e, eq (2) in [2]
-            alpha = tf.nn.softmax(logits=e, dim=2)
-            # apply alpha weights to obtain time varying context
-            task_encoding_soft = tf.multiply(task_encoding_tile, alpha)
-            customized_features = tf.reduce_mean(task_encoding_soft, axis=2)
-            if flags.attention_no_original_embedding and flags.class_embed_size:
-                customized_features = tf.slice(customized_features,
-                         begin=[0, 0, customized_features.shape.as_list()[-1] - flags.class_embed_size],
-                         size=[-1, -1, -1])
-
-    return customized_features
-
-
-def build_self_attention_euclidian_head(features_generic, task_encoding, flags, is_training, scope='self_attention_euclidian_head'):
-    """
-    Implements the euclidian head that does attention at the label lavel first, than collapses over task encoding samples and finally averages over shots
-    :param features_generic:
-    :param task_encoding:
-    :param flags:
-    :param is_training:
-    :param scope:
-    :return:
-    """
-
-    with tf.variable_scope(scope):
-        if len(features_generic.get_shape().as_list()) == 2:
-            features_generic = tf.expand_dims(features_generic, axis=0)
-        if len(task_encoding.get_shape().as_list()) == 2:
-            task_encoding = tf.expand_dims(task_encoding, axis=0)
-
-        # i is the number of steps in the task_encoding sequence
-        # j is the number of steps in the features_generic sequence
-        j = task_encoding.get_shape().as_list()[1]
-        i = features_generic.get_shape().as_list()[1]
-
-        # tile to be able to produce weight matrix alpha in (i,j) space
-        features_generic = tf.expand_dims(features_generic, axis=2)
-        task_encoding = tf.expand_dims(task_encoding, axis=1)
-        # features_generic changes over i and is constant over j
-        # task_encoding changes over j and is constant over i
-        task_encoding_tile = tf.tile(task_encoding, (1, i, 1, 1))
-        features_generic_tile = tf.tile(features_generic, (1, 1, j, 1))
-        # implement equation (4)
-        euclidian = -tf.norm(task_encoding_tile - features_generic_tile, name='neg_euclidian_distance', axis=-1)
-
-        if is_training:
-            euclidian = tf.reshape(euclidian,
-                                   shape=(flags.num_tasks_per_batch * flags.train_batch_size, flags.num_classes_train, flags.num_shots_train),
-                                   name='reshape_to_separate_tasks_task_encoding')
-        else:
-            euclidian_shape = euclidian.get_shape().as_list()
-            euclidian = tf.reshape(euclidian, shape=(euclidian_shape[1], flags.num_classes_test, flags.num_shots_test),
-                                   name='reshape_to_separate_tasks_task_encoding')
-        # Max because there is distance inversion, otherwise, this is a nearest neighbor thing
-        euclidian = tf.reduce_max(euclidian, axis=2, keep_dims=False)
-
-        # if is_training:
-        #     euclidian = tf.reshape(euclidian, shape=(flags.num_tasks_per_batch * flags.train_batch_size, -1))
-        # else:
-        #     euclidian_shape = euclidian.get_shape().as_list()
-        #     euclidian = tf.reshape(euclidian, shape=(euclidian_shape[1], -1))
-
-        return euclidian
-
-
 
 
 def build_std_normalized_head(features_generic, task_encoding, flags, is_training, scope='std_normalized_euc_head'):
@@ -726,57 +544,6 @@ def build_polynomial_head(features_generic, task_encoding, flags, is_training, s
             polynomial_metric = tf.reshape(polynomial_metric, shape=(polynomial_metric_shape[1], -1))
 
         return polynomial_metric
-
-
-def build_perceptron_head(features_generic, task_encoding, flags, is_training, scope='perceptron_head'):
-    """
-    Implements the head using transformation of Euclidian distance
-    :param features_generic:
-    :param task_encoding:
-    :param flags:
-    :param is_training:
-    :param reuse:
-    :param scope:
-    :return:
-    """
-    activation_fn = ACTIVATION_MAP[flags.activation]
-
-    with tf.variable_scope(scope):
-        if len(features_generic.get_shape().as_list()) == 2:
-            features_generic = tf.expand_dims(features_generic, axis=0)
-        if len(task_encoding.get_shape().as_list()) == 2:
-            task_encoding = tf.expand_dims(task_encoding, axis=0)
-
-        # i is the number of steps in the task_encoding sequence
-        # j is the number of steps in the features_generic sequence
-        j = task_encoding.get_shape().as_list()[1]
-        i = features_generic.get_shape().as_list()[1]
-
-        # tile to be able to produce weight matrix alpha in (i,j) space
-        features_generic = tf.expand_dims(features_generic, axis=2)
-        task_encoding = tf.expand_dims(task_encoding, axis=1)
-        # features_generic changes over i and is constant over j
-        # task_encoding changes over j and is constant over i
-        task_encoding_tile = tf.tile(task_encoding, (1, i, 1, 1))
-        features_generic_tile = tf.tile(features_generic, (1, 1, j, 1))
-        # implement equation (4)
-        h = tf.norm(task_encoding_tile - features_generic_tile, name='euclidian_distance', axis=-1)
-        num_outputs=max(flags.num_classes_train, flags.num_classes_test)
-
-        for i in range(flags.perceptron_metric_layers):
-            h = slim.fully_connected(h, flags.perceptron_metric_filters, reuse=False, scope='layer'+str(i),
-                                     activation_fn=activation_fn, trainable=is_training)
-        perceptron_metric = slim.fully_connected(h, num_outputs, reuse=False, activation_fn=None, normalizer_fn=None,
-                                                 scope='out_projection', trainable=is_training)
-
-        if is_training:
-            perceptron_metric = tf.reshape(perceptron_metric, shape=(flags.num_tasks_per_batch * flags.train_batch_size, -1))
-        else:
-            perceptron_metric = tf.slice(perceptron_metric, begin=[0, 0, 0], size=(-1, -1, flags.num_classes_test))
-            polynomial_metric_shape = perceptron_metric.get_shape().as_list()
-            perceptron_metric = tf.reshape(perceptron_metric, shape=(polynomial_metric_shape[1], -1))
-
-        return perceptron_metric
 
 
 def build_cosine_head(features_generic, task_encoding, flags, is_training, scope='cosine_head'):
@@ -1070,44 +837,6 @@ def get_cbn_params(features_task_encode, num_filters_list, flags, reuse=False, i
     return np.asarray(gamma_reshape), np.asarray(beta_reshape)
 
 
-def get_attention_layer(features_generic, task_encoding, flags, is_training=False):
-    features_deploy_custom = []
-    softmax_in = []
-    for i in range(flags.num_attention_models):
-        features_attention = build_feature_customizer_attention(features_generic=features_generic,
-                                                                task_encoding=task_encoding[i],
-                                                                flags=flags, is_training=is_training, reuse=False,
-                                                                scope='customizer' + str(i))
-        features_deploy_custom.append(features_attention)
-
-        if flags.attention_fusion == 'sum':
-            branch_weight = tf.constant([1.0], name='branch_weight' + str(i), dtype=tf.float32)
-            branch_weight = tf.reshape(branch_weight, [1] * features_attention.get_shape().ndims)
-        elif flags.attention_fusion == 'weighted':
-            branch_weight = tf.Variable([0.0], trainable=is_training, name='branch_weight' + str(i), dtype=tf.float32)
-            tf.summary.scalar('attention/branch_weight' + str(0) + str(i), tf.squeeze(branch_weight))
-            branch_weight = 1.0 + tf.reshape(branch_weight, [1] * features_attention.get_shape().ndims)
-        elif flags.attention_fusion == 'highway':
-            branch_weight = slim.fully_connected(tf.concat([features_attention, features_generic], axis=-1), 64,
-                                                 activation_fn=ACTIVATION_MAP[flags.activation], normalizer_fn=None, reuse=False,
-                                                 scope='highway_attention_projection' + str(i), trainable=is_training)
-            branch_weight = 1.0 + slim.fully_connected(branch_weight, 1,
-                                                       activation_fn=None, normalizer_fn=None, reuse=False,
-                                                       scope='highway_attention_weight' + str(i), trainable=is_training)
-        else:
-            raise Exception('Option not implemented')
-        softmax_in.append(branch_weight)
-
-    # softmax_out = tf.nn.softmax(logits=tf.concat(softmax_in, axis=-1))
-    softmax_out = tf.concat(softmax_in, axis=-1)
-    softmax_out = tf.expand_dims(softmax_out, axis=-2)
-    features_deploy_custom = tf.stack(features_deploy_custom, axis=-1)
-
-    features_deploy_custom = tf.reduce_sum(features_deploy_custom * softmax_out, axis=-1,
-                                           name='collect_attention_outputs')
-    return features_deploy_custom
-
-
 def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_encode_pl, flags, is_training, is_primary):
     num_filters = [round(flags.num_filters * pow(flags.block_size_growth, i)) for i in range(flags.num_blocks)]
     reuse = not is_primary
@@ -1131,78 +860,7 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
         else:
             raise Exception('Option not implemented')
 
-        if flags.encoder_classifier_link == 'attention':
-            features_generic = build_feature_extractor_graph(images=images_deploy_pl, flags=flags,
-                                                             is_training=is_training,
-                                                             scope=feature_extractor_classifier_scope,
-                                                             num_filters=num_filters,
-                                                             reuse=ecoder_reuse)
-            if flags.task_encoder_sharing == 'global':
-                task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
-                                                   flags=flags, is_training=is_training, reuse=reuse)
-                task_encoding = [task_encoding] * flags.num_attention_models
-            else:
-                task_encoding = None
-
-            with tf.variable_scope('attention_stack' + str(0), reuse=reuse):
-                if flags.task_encoder_sharing == 'layer':
-                    task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
-                                                       flags=flags, is_training=is_training, reuse=reuse)
-                    task_encoding = [task_encoding] * flags.num_attention_models
-                elif flags.task_encoder_sharing is None:
-                    task_encoding = []
-                    for i in range(flags.num_attention_models):
-                        task_encoding.append(build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
-                                                                flags=flags, is_training=is_training, reuse=reuse,
-                                                                scope='class_encoder'+str(i)))
-                features_deploy_custom = get_attention_layer(features_generic, task_encoding, flags,
-                                                             is_training=is_training)
-            for att_layer in range(1, flags.num_attention_layers):
-                with tf.variable_scope('attention_stack' + str(att_layer), reuse=reuse):
-                    previous_attention_layer = features_deploy_custom
-                    if flags.task_encoder_sharing == 'layer':
-                        task_encoding = build_task_encoder(embeddings=features_task_encode,
-                                                           labels=labels_task_encode_pl,
-                                                           flags=flags, is_training=is_training, reuse=reuse)
-                        task_encoding = [task_encoding] * flags.num_attention_models
-                    elif flags.task_encoder_sharing is None:
-                        task_encoding = []
-                        for i in range(flags.num_attention_models):
-                            task_encoding.append(
-                                build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
-                                                   flags=flags, is_training=is_training, reuse=reuse,
-                                                   scope='class_encoder' + str(i)))
-                    features_deploy_custom = get_attention_layer(previous_attention_layer, task_encoding, flags,
-                                                                 is_training=is_training)
-                    features_deploy_custom = features_deploy_custom + previous_attention_layer
-
-            if is_training:
-                features_deploy_custom = tf.reshape(features_deploy_custom,
-                                                    shape=(flags.num_tasks_per_batch * flags.train_batch_size, -1),
-                                                    name='reshape_to_merge_tasks_custom_features')
-            else:
-                embedding_shape = features_deploy_custom.get_shape().as_list()
-                features_deploy_custom = tf.reshape(features_deploy_custom,
-                                                    shape=(embedding_shape[1], -1),
-                                                    name='reshape_to_merge_tasks_custom_features')
-
-            if flags.fc_dropout:
-                features_deploy_custom = slim.dropout(features_deploy_custom, keep_prob=1.0 - flags.fc_dropout,
-                                                      is_training=is_training)
-
-            if is_primary:
-                logits = slim.fully_connected(features_deploy_custom, flags.num_classes_train,
-                                              activation_fn=None, normalizer_fn=None, reuse=False,
-                                              scope='logits', trainable=is_training)
-                if not is_training:
-                    logits = tf.slice(logits, begin=[0,0], size=(-1,flags.num_classes_test))
-            else:
-                logits = slim.fully_connected(features_deploy_custom, flags.aux_num_classes_test,
-                                              activation_fn=None, normalizer_fn=None, reuse=False,
-                                              scope='aux_logits', trainable=is_training)
-
-        elif flags.encoder_classifier_link=='prototypical':
-            flags.task_encoder = 'class_mean'
+        if flags.encoder_classifier_link=='prototypical':
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags, is_training=is_training, reuse=reuse)
             features_generic = build_feature_extractor_graph(images=images_deploy_pl, flags=flags,
@@ -1212,7 +870,6 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                              reuse=ecoder_reuse)
             logits = build_prototypical_head(features_generic, task_encoding, flags, is_training=is_training)
         elif flags.encoder_classifier_link=='cosine':
-            flags.task_encoder = 'class_mean'
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags, is_training=is_training, reuse=reuse)
             features_generic = build_feature_extractor_graph(images=images_deploy_pl, flags=flags,
@@ -1222,7 +879,6 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                              reuse=ecoder_reuse)
             logits = build_cosine_head(features_generic, task_encoding, flags, is_training=is_training)
         elif flags.encoder_classifier_link=='polynomial':
-            flags.task_encoder = 'class_mean'
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags, is_training=is_training, reuse=reuse)
             features_generic = build_feature_extractor_graph(images=images_deploy_pl, flags=flags,
@@ -1231,28 +887,7 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                              num_filters=num_filters,
                                                              reuse=ecoder_reuse)
             logits = build_polynomial_head(features_generic, task_encoding, flags, is_training=is_training)
-        elif flags.encoder_classifier_link == 'perceptron':
-            flags.task_encoder = 'class_mean'
-            task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
-                                               flags=flags, is_training=is_training, reuse=reuse)
-            features_generic = build_feature_extractor_graph(images=images_deploy_pl, flags=flags,
-                                                             is_training=is_training,
-                                                             scope=feature_extractor_classifier_scope,
-                                                             num_filters=num_filters,
-                                                             reuse=ecoder_reuse)
-            logits = build_perceptron_head(features_generic, task_encoding, flags, is_training=is_training)
-        elif flags.encoder_classifier_link=='self_attention_euclidian':
-            flags.task_encoder = 'self_attention'
-            task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
-                                               flags=flags, is_training=is_training, reuse=reuse)
-            features_generic = build_feature_extractor_graph(images=images_deploy_pl, flags=flags,
-                                                             is_training=is_training,
-                                                             scope=feature_extractor_classifier_scope,
-                                                             num_filters=num_filters,
-                                                             reuse=ecoder_reuse)
-            logits = build_prototypical_head(features_generic, task_encoding, flags, is_training=is_training)
         elif flags.encoder_classifier_link=='std_normalized_euc_head':
-            flags.task_encoder = 'class_mean'
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags, is_training=is_training, reuse=reuse)
             features_generic = build_feature_extractor_graph(images=images_deploy_pl, flags=flags,
@@ -1262,7 +897,6 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                              reuse=ecoder_reuse)
             logits = build_std_normalized_head(features_generic, task_encoding, flags, is_training=is_training)
         elif flags.encoder_classifier_link == 'cbn':
-            flags.task_encoder = 'class_mean'
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags,
                                                is_training=is_training, reuse=reuse)
@@ -1287,7 +921,6 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                              reuse=ecoder_reuse)
             logits = build_polynomial_head(features_generic, task_encoding, flags, is_training=is_training)
         elif flags.encoder_classifier_link == 'cbn_cos':
-            flags.task_encoder = 'class_mean'
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags,
                                                is_training=is_training, reuse=reuse)
@@ -2046,9 +1679,7 @@ def main(argv=None):
         eval(flags=flags, is_primary=True)
     elif flags.mode == 'test':
         test(flags=flags)
-    elif flags.mode == 'create_embedding':
-        create_embedding(flags=default_params, split='target_val')
-        create_embedding(flags=default_params, split='target_tst')
+        
 
 if __name__ == '__main__':
     tf.app.run()
