@@ -16,7 +16,7 @@ if __name__ == "__main__":
     exp_description = "scale_crossvalidation_MIN"
 
     params = dict(
-        repeat=list(range(0, 10)),  # used to repeate the same experiment
+        repeat=list(range(0, 1)),  # used to repeate the same experiment
         data_dir='/mnt/datasets/public/mini-imagenet',  # '/home/boris/cifar100',  # '/mnt/datasets/public/mini-imagenet',
         eval_interval_steps=5000,
         train_batch_size=32,  # [16, 32, 64]
@@ -39,7 +39,7 @@ if __name__ == "__main__":
         weight_decay_cbn=0.01,
         init_learning_rate=0.1,  # [0.1, 0.001],
         augment=False,
-        number_of_steps=30000,  # [5 * 5200, 3 * 5200],
+        number_of_steps=[30000, 60000],  # [5 * 5200, 3 * 5200],
         feature_extractor='simple_res_net',
         activation='swish-1',  # ['relu', 'selu', 'swish-1']
         encoder_sharing='shared',  # ['shared', 'siamese'],
@@ -92,25 +92,28 @@ if __name__ == "__main__":
 
     aidata_home = parser.parse_known_args()[0].aidata_home
     exp_tag = '_'.join(find_variables(params))  # extract variable names
-    exp_dir = os.path.join(aidata_home, "experiments_task_encoder",
+    exp_dir = os.path.join(aidata_home, "experiments_cleaning",
                            "%s_mini_imagenet_%s_%s" % (time.strftime("%y%m%d_%H%M%S"), exp_tag, exp_description))
 
     project_path = os.path.join(aidata_home, "dev/TADAM")
+    
+    # This is for the reproducibility purposes
+    repo_path = '/mnt' + project_path
+    repo = git.Repo(path=repo_path)
+    params['commit'] = repo.head.object.hexsha
+    
     borgy_args = [
         "--image=images.borgy.elementai.lan/tensorflow/tensorflow:1.4.1-devel-gpu-py3",
-        "-e", "PYTHONPATH=%s" % project_path,
+        "-e", "PYTHONPATH=%s" % repo_path,
         "-e", "DATA_PATH=/mnt/datasets/public/",
         "-v", "/mnt/datasets/public/:/mnt/datasets/public/",
-        "--req-cores=2",
-        "--req-gpus=1",
-        "--req-ram-gbytes=16",
+        "-v", "/mnt/home/boris/:/mnt/home/boris/",
+        "--cpu=2",
+        "--gpu=1",
+        "--mem=16",
         "--restartable"
     ]
-
-    # This is for the reproducibility purposes
-    repo = git.Repo(path='/mnt' + project_path)
-    params['commit'] = repo.head.object.hexsha
-
-    cmd = os.path.join(project_path, "model/tadam.py")
+    
+    cmd = os.path.join(repo_path, "model/tadam.py")
 
     gen_experiments_dir(params, exp_dir, exp_description, cmd, blocking=True, borgy_args=borgy_args)

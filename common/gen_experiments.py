@@ -63,7 +63,7 @@ def gen_experiments_dir(param_dict, root_dir, exp_description, cmd=None, blockin
         if cmd is not None:
 
             if borgy_args:
-                cmd_ = """cd '%s'; stdbuf -oL '%s' --exp_dir='%s' 1>>stdout 2>>stderr""" %(exp_dir_borgy, cmd, exp_dir_borgy)
+                cmd_ = """cd '%s'; stdbuf -oL '%s' --exp_dir='%s' 1>>stdout 2>>stderr""" %(exp_dir, cmd, exp_dir)
                 args = ['borgy', 'submit', '--name', "%s_(%s)" % (exp_description, name)] + borgy_args + ['--', 'bash', '-c', cmd_, ]
                 str_cmd = ' '.join(['"'+arg+'"' for arg in args])
                 print(str_cmd)
