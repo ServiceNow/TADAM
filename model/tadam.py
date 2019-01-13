@@ -17,7 +17,7 @@ from scipy.spatial import KDTree
 from datasets.data import _load_mini_imagenet
 from common.util import Dataset
 from common.util import ACTIVATION_MAP
-from tqdm import trange
+# from tqdm import trange
 import pathlib
 import logging
 from common.util import summary_writer
@@ -71,15 +71,13 @@ def get_arguments():
     # Training parameters
     parser.add_argument('--repeat', type=int, default=0)
     parser.add_argument('--number_of_steps', type=int, default=int(30000),
-                        help="Number of training steps (number of Epochs in Hugo's paper)")
+                        help="Number of training steps")
     parser.add_argument('--number_of_steps_to_early_stop', type=int, default=int(1000000),
                         help="Number of training steps after half way to early stop the training")
     parser.add_argument('--log_dir', type=str, default='', help='Base log dir')
-    parser.add_argument('--exp_dir', type=str, default=None, help='experiement directory for Borgy')
+    parser.add_argument('--exp_dir', type=str, default=None, help='experiment directory for Borgy')
     parser.add_argument('--num_classes_train', type=int, default=5, help='Number of classes in the train phase, this is coming from the prototypical networks')
     parser.add_argument('--num_shots_train', type=int, default=5, help='Number of shots in a few shot meta-train scenario')
-    parser.add_argument('--num_samples_train', type=int, default=(38400 - 5120), help='Number of train samples.')
-    parser.add_argument('--num_samples_val', type=int, default=5120, help='Number of train samples.')
     parser.add_argument('--train_batch_size', type=int, default=32, help='Training batch size.')
     parser.add_argument('--pre_train_batch_size', type=int, default=64, help='Batch size to pretrain feature extractor.')
     parser.add_argument('--num_tasks_per_batch', type=int, default=2,
@@ -142,7 +140,7 @@ def get_arguments():
     parser.add_argument('--feature_extractor', type=str, default='simple_res_net',
                         choices=['simple_conv_net', 'simple_res_net', 'res_net', 'dense_net', 'residense_net', 'res_net_34'], help='Which feature extractor to use')
     # Feature extractor pretraining parameters (auxiliary 64-classification task)
-    parser.add_argument('--feat_extract_pretrain', type=str, default='multitask',
+    parser.add_argument('--feat_extract_pretrain', type=str, default=None,
                         choices=[None, 'finetune', 'freeze', 'multitask'], help='Whether or not pretrain the feature extractor')
     parser.add_argument('--feat_extract_pretrain_offset', type=int, default=15000)
     parser.add_argument('--feat_extract_pretrain_decay_rate', type=float, default=0.9, help='rate at which 64 way task selection probability decays in multitask mode')
@@ -165,7 +163,7 @@ def get_arguments():
 
     parser.add_argument('--encoder_sharing', type=str, default='shared',
                         choices=['shared', 'siamese'], help='How to link fetaure extractors in task encoder and classifier')
-    parser.add_argument('--encoder_classifier_link', type=str, default='cbn',
+    parser.add_argument('--encoder_classifier_link', type=str, default='polynomial',
                         choices=['attention', 'cbn', 'prototypical', 'std_normalized_euc_head', 'self_attention_euclidian',
                                  'cosine', 'polynomial', 'perceptron', 'cbn_cos'],
                         help='How to link fetaure extractors in task encoder and classifier')
@@ -174,7 +172,7 @@ def get_arguments():
     parser.add_argument('--task_encoder', type=str, default='class_mean', choices=['talkthrough', 'class_mean', 'label_embed', 'self_attention'])
     parser.add_argument('--num_self_attention_splits', type=int, default=1)
 
-    parser.add_argument('--metric_multiplier_init', type=float, default=10.0, help='multiplier of cosine metric')
+    parser.add_argument('--metric_multiplier_init', type=float, default=1.0, help='multiplier of cosine metric')
     parser.add_argument('--metric_multiplier_trainable', type=bool, default=False, help='multiplier of cosine metric trainability')
     parser.add_argument('--polynomial_metric_order', type=int, default=1)
     parser.add_argument('--perceptron_metric_filters', type=int, default=64)
@@ -193,10 +191,6 @@ def get_arguments():
 
     parser.add_argument('--num_batches_neg_mining', type=int, default=0)
 
-    parser.add_argument('--embed_num_of_tasks', type=int, default=1000)
-    parser.add_argument('--embed_dir', type=str, default='embeddings')
-    parser.add_argument('--embed_num_queries', type=int, default=100)
-
     args = parser.parse_args()
     if args.num_evals == 0:
         args.num_evals = args.num_samples_eval / args.eval_batch_size
@@ -214,10 +208,9 @@ def get_logdir_name(flags):
     -------
         the name of the directory to store the training and evaluation results
     """
-    epochs = (flags.number_of_steps * flags.train_batch_size) / flags.num_samples_train
-
+    
     param_list = ['batch_size', str(flags.train_batch_size), 'num_tasks', str(flags.num_tasks_per_batch), 'lr', str(flags.init_learning_rate), 'lr_anneal', flags.lr_anneal,
-                  'epochs', str(epochs), 'dropout', str(flags.dropout), 'opt', flags.optimizer,
+                  'dropout', str(flags.dropout), 'opt', flags.optimizer,
                   'weight_decay', str(flags.weight_decay),
                   'nfilt', str(flags.num_filters), 'feature_extractor', str(flags.feature_extractor),
                   'task_encoder', str(flags.task_encoder), 'att_nfilt', str(flags.attention_num_filters),
@@ -1197,7 +1190,7 @@ def preprocess(images):
 def get_nearest_neighbour_acc(flags, embeddings, labels):
     num_correct = 0
     num_tot = 0
-    for i in trange(flags.num_cases_test):
+    for i in range(flags.num_cases_test):
         test_classes = np.random.choice(np.unique(labels), size=flags.num_classes_test, replace=False)
         train_idxs, test_idxs = get_few_shot_idxs(labels=labels, classes=test_classes, num_shots=flags.num_shots_test)
         # TODO: this is to fix the OOM error, this can be removed when embed() supports batch processing
@@ -2245,7 +2238,7 @@ class ModelLoader:
         num_correct = 0.0
         num_tot = 0.0
         loss_tot = 0.0
-        for i in trange(num_batches):
+        for i in range(num_batches): # trange
             if self.is_primary:
                 num_classes, num_shots = self.flags.num_classes_test, self.flags.num_shots_test
             else:
@@ -2373,53 +2366,6 @@ def eval_pretrain(flags, data_set_train, data_set_test):
     eval_writer(model.step, **results)
     logging.info("pretrain_accuracy_%s: %.3g, pretrain_accuracy_%s: %.3g." % ("test", acc_tst, "train", acc_trn))
 
-
-def create_embedding(flags, split='target_val'):
-    pathlib.Path(flags.embed_dir).mkdir(parents=True, exist_ok=True)
-    model = ModelLoader(model_path=flags.pretrained_model_dir, batch_size=flags.embed_num_queries, is_primary=True)
-
-    data_val = Dataset(_load_mini_imagenet(data_dir=model.flags.data_dir, split=split))
-
-    features_sample, features_query = [], []
-    labels_sample, labels_query = [], []
-    num_correct = 0.0
-    num_tot = 0.0
-    for i in trange(flags.embed_num_of_tasks):
-        images_deploy, labels_deploy, images_task_encode, labels_task_encode = \
-            data_val.next_few_shot_batch(deploy_batch_size=flags.embed_num_queries,
-                                         num_classes_test=model.flags.num_classes_test,
-                                         num_shots=model.flags.num_shots_test,
-                                         num_tasks=1)
-
-        feed_dict = {model.tensor_images_deploy: images_deploy.astype(dtype=np.float32),
-                     model.tensor_labels_task_encode: labels_task_encode,
-                     model.tensor_images_task_encode: images_task_encode.astype(dtype=np.float32)}
-
-        logits, features_sample_task, features_query_task = model.sess.run(
-            [model.logits, model.features_sample, model.features_query], feed_dict)
-
-        features_sample.append(np.squeeze(features_sample_task))
-        labels_sample.append(labels_task_encode)
-        features_query.append(np.squeeze(features_query_task))
-        labels_query.append(labels_deploy)
-
-        labels_deploy_pred = np.argmax(logits, axis=-1)
-        num_matches = sum(labels_deploy_pred == labels_deploy)
-        num_correct += num_matches
-        num_tot += len(labels_deploy_pred)
-
-    logging.info("Model accuracy_%s: %.3g." % (split, 100.0*num_correct/num_tot))
-
-    features_sample = np.stack(features_sample, axis=0)
-    features_query = np.stack(features_query, axis=0)
-    labels_sample = np.stack(labels_sample, axis=0)
-    labels_query = np.stack(labels_query, axis=0)
-    np.savez(os.path.join(flags.embed_dir, 'embedding-{}.npz'.format(split)),
-             features_sample=features_sample, labels_sample=labels_sample,
-             features_query=features_query, labels_query=labels_query,
-             accuracy=num_correct/num_tot)
-
-    return None
 
 def image_augment(images):
     """
