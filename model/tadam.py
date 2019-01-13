@@ -163,7 +163,6 @@ def get_arguments():
     parser.add_argument('--metric_multiplier_trainable', type=bool, default=False, help='multiplier of cosine metric trainability')
     parser.add_argument('--polynomial_metric_order', type=int, default=1)
 
-    parser.add_argument('--cbn_premultiplier', type=str, default='var', choices=['var', 'projection'])
     parser.add_argument('--cbn_num_layers', type=int, default=3)
     parser.add_argument('--cbn_per_block', type=bool, default=False)
     parser.add_argument('--cbn_per_network', type=bool, default=False)
@@ -722,47 +721,17 @@ def get_cbn_premultiplier(task_encoding, i, j, flags, is_training, reuse):
     :param reuse:
     :return:
     """
-    if flags.cbn_premultiplier == 'var':
-        beta_weight = tf.get_variable(name='beta_weight' + str(i) + str(j), dtype=tf.float32, initializer=0.0,
-                                      trainable=is_training,
-                                      regularizer=tf.contrib.layers.l2_regularizer(scale=flags.weight_decay_cbn,
-                                                                                   scope='penalize_beta' + str(i) + str(j)))
-        gamma_weight = tf.get_variable(name='gamma_weight' + str(i) + str(j), dtype=tf.float32, initializer=0.0,
-                                       trainable=is_training,
-                                       regularizer=tf.contrib.layers.l2_regularizer(scale=flags.weight_decay_cbn,
-                                                                                    scope='penalize_gamma' + str(i) + str(
-                                                                                        j)))
-        tf.summary.scalar('beta_weight' + str(i) + str(j), beta_weight)
-        tf.summary.scalar('gamma_weight' + str(i) + str(j), gamma_weight)
-    elif flags.cbn_premultiplier == 'projection':
-        beta_weight_projection = slim.fully_connected(task_encoding, num_outputs=1,
-                                                      activation_fn=None, normalizer_fn=None, reuse=reuse,
-                                                      weights_initializer=init_ops.zeros_initializer(),
-                                                      weights_regularizer=tf.contrib.layers.l2_regularizer(
-                                                          scale=flags.weight_decay),
-                                                      scope='beta_weight' + str(i) + str(j), trainable=is_training)
-        gamma_weight_projection = slim.fully_connected(task_encoding, num_outputs=1,
-                                                       activation_fn=None, normalizer_fn=None, reuse=reuse,
-                                                       weights_initializer=init_ops.zeros_initializer(),
-                                                       weights_regularizer=tf.contrib.layers.l2_regularizer(
-                                                           scale=flags.weight_decay),
-                                                       scope='gamma_weight' + str(i) + str(j), trainable=is_training)
-
-        beta_weight = tf.get_variable(name='beta_weight' + str(i) + str(j), dtype=tf.float32,
-                                      shape=beta_weight_projection.shape,
-                                      trainable=is_training,
-                                      regularizer=tf.contrib.layers.l2_regularizer(
-                                          scale=flags.weight_decay_cbn,
-                                          scope='penalize_beta' + str(i) + str(j)))
-        gamma_weight = tf.get_variable(name='gamma_weight' + str(i) + str(j), dtype=tf.float32,
-                                       shape=gamma_weight_projection.shape,
-                                       trainable=is_training,
-                                       regularizer=tf.contrib.layers.l2_regularizer(
-                                           scale=flags.weight_decay_cbn,
-                                           scope='penalize_gamma' + str(i) + str(j)))
-        beta_weight = tf.assign(beta_weight, beta_weight_projection, name='assign_beta_weight_projection' + str(i) + str(j))
-        gamma_weight = tf.assign(gamma_weight, gamma_weight_projection, name='assign_gamma_weight_projection' + str(i) + str(j))
-
+    beta_weight = tf.get_variable(name='beta_weight' + str(i) + str(j), dtype=tf.float32, initializer=0.0,
+                                  trainable=is_training,
+                                  regularizer=tf.contrib.layers.l2_regularizer(scale=flags.weight_decay_cbn,
+                                                                               scope='penalize_beta' + str(i) + str(j)))
+    gamma_weight = tf.get_variable(name='gamma_weight' + str(i) + str(j), dtype=tf.float32, initializer=0.0,
+                                   trainable=is_training,
+                                   regularizer=tf.contrib.layers.l2_regularizer(scale=flags.weight_decay_cbn,
+                                                                                scope='penalize_gamma' + str(i) + str(
+                                                                                    j)))
+    tf.summary.scalar('beta_weight' + str(i) + str(j), beta_weight)
+    tf.summary.scalar('gamma_weight' + str(i) + str(j), gamma_weight)
     return beta_weight, gamma_weight
 
 

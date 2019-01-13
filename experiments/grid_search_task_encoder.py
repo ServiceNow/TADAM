@@ -43,7 +43,6 @@ if __name__ == "__main__":
         activation='swish-1',  # ['relu', 'selu', 'swish-1']
         encoder_sharing='shared',  # ['shared', 'siamese'],
         encoder_classifier_link=['cbn', 'polynomial'],  # ['polynomial','prototypical','cosine', 'cbn'], 
-        cbn_premultiplier='var',
         cbn_num_layers=[3],
         cbn_per_block=False,
         cbn_per_network=False,
