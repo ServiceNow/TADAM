@@ -64,12 +64,6 @@ if __name__ == "__main__":
         feature_bottleneck_size=None,
         feature_expansion_size=None,
         num_classes_pretrain=64,
-        aux_num_classes_test=10,
-        aux_num_shots=1,
-        aux_decay_rate=None,  # 0.9
-        aux_decay_n=20,
-        aux_lr_decay_rate=5.0,
-        aux_lr_decay_n=1.6,  # [1.6, 2.6, 3.0],
         conv_dropout=None,
     )
 

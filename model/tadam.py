@@ -139,17 +139,6 @@ def get_arguments():
                         help='rate at which 64 way task learning rate decays')
     parser.add_argument('--feat_extract_pretrain_lr_decay_n', type=float, default=2.0,
                         help='number of times 64 way task learning rate decays')
-    # Multitask few-shot training auxiliary task
-    parser.add_argument('--aux_num_classes_test', type=int, default=10, help='Number of classes in the test phase, auxiliary task')
-    parser.add_argument('--aux_num_shots', type=int, default=1, help='Number of shots in a few shot scenario, auxiliary task')
-    parser.add_argument('--aux_decay_rate', type=float, default=None,
-                        help='rate at which auxiliary few-shot task selection probability decays in multitask mode')
-    parser.add_argument('--aux_decay_n', type=int, default=20,
-                        help='number of times auxiliary few-shot task selection probability decays in multitask mode')
-    parser.add_argument('--aux_lr_decay_rate', type=float, default=5.0,
-                        help='rate at which auxiliary few-shot task learning rate decays')
-    parser.add_argument('--aux_lr_decay_n', type=float, default=None,
-                        help='number of times auxiliary few-shot task learning rate decays')
     parser.add_argument('--encoder_classifier_link', type=str, default='polynomial',
                         choices=['cbn', 'prototypical', 'std_normalized_euc_head',
                                  'cosine', 'polynomial', 'cbn_cos'],
@@ -803,9 +792,9 @@ def get_cbn_params(features_task_encode, num_filters_list, flags, reuse=False, i
     return np.asarray(gamma_reshape), np.asarray(beta_reshape)
 
 
-def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_encode_pl, flags, is_training, is_primary):
+def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_encode_pl, flags, is_training):
     num_filters = [round(flags.num_filters * pow(flags.block_size_growth, i)) for i in range(flags.num_blocks)]
-    reuse = not is_primary
+    reuse = False
 
     with tf.variable_scope('Model'):
         feature_extractor_encoding_scope = 'feature_extractor_encoder'
@@ -983,9 +972,7 @@ def train(flags):
     with tf.Graph().as_default():
         global_step = tf.Variable(0, trainable=False, name='global_step', dtype=tf.int64)
         global_step_pretrain = tf.Variable(0, trainable=False, name='global_step_pretrain', dtype=tf.int64)
-
-        if flags.aux_decay_rate:
-            aux_lr_decay_step = int(float(flags.number_of_steps) / flags.aux_lr_decay_n)
+        
         num_pretrain_steps = flags.feat_extract_pretrain_offset
         pretrain_lr_decay_step = int(float(flags.feat_extract_pretrain_offset) / flags.feat_extract_pretrain_lr_decay_n)
         if flags.feat_extract_pretrain == 'multitask' or flags.feat_extract_pretrain is None:
@@ -1033,7 +1020,7 @@ def train(flags):
         # Primary task operations
         logits, _, _ = build_inference_graph(images_deploy_pl=images_deploy_pl, images_task_encode_pl=images_task_encode_pl,
                                        labels_task_encode_pl=labels_task_encode_pl,
-                                       flags=flags, is_training=True, is_primary=True)
+                                       flags=flags, is_training=True)
         loss = tf.reduce_mean(
             tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=tf.one_hot(labels_deploy_pl, flags.num_classes_train)))
 
@@ -1071,46 +1058,7 @@ def train(flags):
         tf.summary.scalar('learning_rate', learning_rate)
         # Merge all summaries except for pretrain
         summary = tf.summary.merge(tf.get_collection('summaries', scope='(?!pretrain).*'))
-
-        # Auxiliary few shot learning task
-        if flags.aux_decay_rate:
-            with tf.variable_scope('auxiliary_few_shot_task', reuse=False):
-                aux_images_deploy_pl, aux_labels_deploy_pl = placeholder_inputs(
-                    batch_size=flags.num_tasks_per_batch * flags.train_batch_size,
-                    image_size=image_size, scope='inputs/deploy')
-                aux_images_task_encode_pl, aux_labels_task_encode_pl = placeholder_inputs(
-                    batch_size=flags.num_tasks_per_batch * flags.aux_num_classes_test * flags.aux_num_shots,
-                    image_size=image_size, scope='inputs/task_encode')
-
-            aux_logits, _, _ = build_inference_graph(images_deploy_pl=aux_images_deploy_pl,
-                                               images_task_encode_pl=aux_images_task_encode_pl,
-                                               labels_task_encode_pl=aux_labels_task_encode_pl,
-                                               flags=flags, is_training=True, is_primary=False)
-
-            with tf.variable_scope('auxiliary_few_shot_task', reuse=False):
-                aux_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=aux_logits,
-                                          labels=tf.one_hot(aux_labels_deploy_pl, flags.aux_num_classes_test)))
-                aux_regu_losses = slim.losses.get_regularization_losses()
-                aux_loss = tf.add_n([aux_loss] + aux_regu_losses)
-                aux_misclass = 1.0 - slim.metrics.accuracy(tf.argmax(aux_logits, 1), aux_labels_deploy_pl)
-                aux_learning_rate = tf.train.exponential_decay(flags.init_learning_rate, global_step, aux_lr_decay_step,
-                                                               1.0 / flags.aux_lr_decay_rate, staircase=True)
-                aux_optimizer = tf.train.MomentumOptimizer(learning_rate=aux_learning_rate, momentum=0.9,
-                                                                name='AuxOptimizer')
-
-                global_step_aux = tf.Variable(0, trainable=False, name='global_step_pretrain', dtype=tf.int64)
-                aux_train_op = slim.learning.create_train_op(total_loss=aux_loss,
-                                                                  optimizer=aux_optimizer,
-                                                                  global_step=global_step_aux,
-                                                                  clip_gradient_norm=flags.clip_gradient_norm)
-
-                tf.summary.scalar('aux/loss', aux_loss)
-                tf.summary.scalar('aux/misclassification', aux_misclass)
-                tf.summary.scalar('aux/learning_rate', aux_learning_rate)
-                # Merge only aux summaries
-                aux_summary = tf.summary.merge(tf.get_collection('summaries', scope='aux'))
-
-
+        
         # Get datasets
         few_shot_data_train, pretrain_data_train, pretrain_data_test = get_train_datasets(flags)
         # Define session and logging
@@ -1183,42 +1131,7 @@ def train(flags):
 
                     if not flags.feat_extract_pretrain=='multitask':
                         continue
-
-                # This is auxiliary few-shot task pretrain loop
-                if flags.aux_decay_rate:
-                    # get batch of data to compute classification loss on auxiliary task
-                    aux_images_deploy, aux_labels_deploy, aux_images_task_encode, aux_labels_task_encode = \
-                        few_shot_data_train.next_few_shot_batch(deploy_batch_size=flags.train_batch_size,
-                                                                num_classes_test=flags.aux_num_classes_test,
-                                                                num_shots=flags.aux_num_shots_train,
-                                                                num_tasks=flags.num_tasks_per_batch)
-                    aux_feed_dict = {aux_images_deploy_pl: aux_images_deploy.astype(dtype=np.float32),
-                                 aux_labels_deploy_pl: aux_labels_deploy,
-                                 aux_images_task_encode_pl: aux_images_task_encode.astype(dtype=np.float32),
-                                 aux_labels_task_encode_pl: aux_labels_task_encode}
-                    # TODO: this should not be necessary, but tf still says that I have to feed aux related placeholders
-                    feed_dict.update(aux_feed_dict)
-                    # Compute probability to select 64-way classification task
-                    aux_decay_steps = flags.number_of_steps // flags.aux_decay_n
-                    aux_proba = pow(flags.aux_decay_rate, step // aux_decay_steps + 1)
-
-                    t_train = time.time()
-                    if np.random.uniform() < aux_proba:
-                        aux_loss = sess.run(aux_train_op, feed_dict=feed_dict)
-                    else:
-                        aux_loss = np.nan
-                    dt_train = time.time() - t_train
-
-                    if step % 100 == 0:
-                        aux_summary_str = sess.run(aux_summary, feed_dict=feed_dict)
-                        summary_writer.add_summary(aux_summary_str, step)
-                        summary_writer.flush()
-                        logging.info("step %d, auxiliary few-shot loss : %.4g, dt: %.3gs" % (step, aux_loss, dt_train))
-
-                    if step % 1000 == 0:
-                        saver.save(sess, os.path.join(log_dir, 'model'), global_step=step)
-                        eval(flags=flags, is_primary=False)
-
+                        
                 t_train = time.time()
                 loss = sess.run(train_op, feed_dict=feed_dict)
                 dt_train = time.time() - t_train
@@ -1234,7 +1147,7 @@ def train(flags):
 
                 if eval_interval_steps > 0 and step % eval_interval_steps == 0:
                     saver.save(sess, os.path.join(log_dir, 'model'), global_step=step)
-                    eval(flags=flags, is_primary=True)
+                    eval(flags=flags)
 
                 if float(step-num_pretrain_steps) > 0.5*flags.number_of_steps + flags.number_of_steps_to_early_stop:
                     break
@@ -1376,7 +1289,7 @@ class PretrainModelLoader:
 
 
 class ModelLoader:
-    def __init__(self, model_path, batch_size, is_primary):
+    def __init__(self, model_path, batch_size):
         self.batch_size = batch_size
 
         latest_checkpoint = tf.train.latest_checkpoint(checkpoint_dir=os.path.join(model_path, 'train'))
@@ -1388,10 +1301,7 @@ class ModelLoader:
         with tf.Graph().as_default():
             images_deploy_pl, labels_deploy_pl = placeholder_inputs(batch_size=batch_size,
                                                                     image_size=image_size, scope='inputs/deploy')
-            if is_primary:
-                task_encode_batch_size = flags.num_classes_test * flags.num_shots_test
-            else:
-                task_encode_batch_size = flags.aux_num_classes_test * flags.aux_num_shots
+            task_encode_batch_size = flags.num_classes_test * flags.num_shots_test
             images_task_encode_pl, labels_task_encode_pl = placeholder_inputs(batch_size=task_encode_batch_size,
                                                                               image_size=image_size, scope='inputs/task_encode')
 
@@ -1406,17 +1316,10 @@ class ModelLoader:
                 pretrain_images_pl, pretrain_labels_pl = placeholder_inputs(
                     batch_size=flags.pre_train_batch_size, image_size=image_size, scope='inputs/pretrain')
                 pretrain_logits = build_feat_extract_pretrain_graph(pretrain_images_pl, flags, is_training=False)
-            # TODO: This is just used to create the variables of primary graph that will be reused in aux graph
-            if not is_primary:
-                primary_logits, _, _ = build_inference_graph(images_deploy_pl=images_deploy_pl,
-                                               images_task_encode_pl=images_task_encode_pl,
-                                               labels_task_encode_pl=labels_task_encode_pl,
-                                               flags=flags, is_training=False, is_primary=True)
 
             logits, features_sample, features_query = build_inference_graph(
                         images_deploy_pl=images_deploy_pl, images_task_encode_pl=images_task_encode_pl,
-                        labels_task_encode_pl=labels_task_encode_pl, flags=flags, is_training=False,
-                        is_primary=is_primary)
+                        labels_task_encode_pl=labels_task_encode_pl, flags=flags, is_training=False)
 
             loss = tf.reduce_mean(
                 tf.nn.softmax_cross_entropy_with_logits(logits=logits,
@@ -1445,7 +1348,6 @@ class ModelLoader:
             self.features_query = features_query
             self.logits_size = self.logits.get_shape().as_list()[-1]
             self.step = step
-            self.is_primary=is_primary
 
             log_dir = get_logdir_name(flags)
             graphpb_txt = str(tf.get_default_graph().as_graph_def())
@@ -1461,11 +1363,8 @@ class ModelLoader:
         num_tot = 0.0
         loss_tot = 0.0
         for i in range(num_batches): # trange
-            if self.is_primary:
-                num_classes, num_shots = self.flags.num_classes_test, self.flags.num_shots_test
-            else:
-                num_classes, num_shots = self.flags.aux_num_classes_test, self.flags.aux_num_shots
-
+            num_classes, num_shots = self.flags.num_classes_test, self.flags.num_shots_test
+            
             images_deploy, labels_deploy, images_task_encode, labels_task_encode = \
                 data_set.next_few_shot_batch(deploy_batch_size=self.batch_size,
                                              num_classes_test=num_classes, num_shots=num_shots,
@@ -1534,12 +1433,8 @@ def get_agg_misclassification(logits_dict, labels_dict):
     return summary_ops, update_ops
 
 
-def eval(flags, is_primary):
+def eval(flags):
     log_dir = get_logdir_name(flags)
-    if is_primary:
-        aux_prefix=''
-    else:
-        aux_prefix='aux/'
 
     eval_writer = summary_writer(log_dir + '/eval')
     i=0
@@ -1549,24 +1444,24 @@ def eval(flags, is_primary):
         model_step = int(os.path.basename(latest_checkpoint or '0-0').split('-')[1])
         if last_step < model_step:
             results = {}
-            model = ModelLoader(model_path=flags.pretrained_model_dir, batch_size=flags.eval_batch_size, is_primary=is_primary)
+            model = ModelLoader(model_path=flags.pretrained_model_dir, batch_size=flags.eval_batch_size)
             
             acc_tst, loss_tst = model.eval(data_dir=flags.data_dir, num_cases_test=flags.num_cases_test, split='target_tst')
             acc_val, loss_val = model.eval(data_dir=flags.data_dir, num_cases_test=flags.num_cases_test, split='target_val')
             acc_trn, loss_trn = model.eval(data_dir=flags.data_dir, num_cases_test=flags.num_cases_test, split='sources')
 
-            results[aux_prefix + "accuracy_target_tst"] = acc_tst
-            results[aux_prefix + "accuracy_target_val"] = acc_val
-            results[aux_prefix + "accuracy_sources"] = acc_trn
+            results["accuracy_target_tst"] = acc_tst
+            results["accuracy_target_val"] = acc_val
+            results["accuracy_sources"] = acc_trn
 
-            results[aux_prefix + "loss_target_tst"] = loss_tst
-            results[aux_prefix + "loss_target_val"] = loss_val
-            results[aux_prefix + "loss_sources"] = loss_trn
+            results["loss_target_tst"] = loss_tst
+            results["loss_target_val"] = loss_val
+            results["loss_sources"] = loss_trn
             
             last_step = model.step
             eval_writer(model.step, **results)
             logging.info("accuracy_%s: %.3g, accuracy_%s: %.3g, accuracy_%s: %.3g."
-                         %(aux_prefix+"target_tst", acc_tst, aux_prefix+"target_val", acc_val, aux_prefix+"sources", acc_trn))
+                         %("target_tst", acc_tst, "target_val", acc_val, "sources", acc_trn))
         if flags.eval_interval_secs > 0:
             time.sleep(flags.eval_interval_secs)
         i=i+1
@@ -1632,7 +1527,7 @@ def main(argv=None):
     elif flags.mode == 'train_classifier':
         train_classifier(flags=flags)
     elif flags.mode == 'eval':
-        eval(flags=flags, is_primary=True)
+        eval(flags=flags)
     elif flags.mode == 'test':
         test(flags=flags)
         
