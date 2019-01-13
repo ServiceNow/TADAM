@@ -83,7 +83,6 @@ if __name__ == "__main__":
         aux_lr_decay_rate=5.0,
         aux_lr_decay_n=1.6,  # [1.6, 2.6, 3.0],
         conv_dropout=None,
-        num_batches_neg_mining=0,
     )
 
     parser = argparse.ArgumentParser()

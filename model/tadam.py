@@ -189,8 +189,7 @@ def get_arguments():
     parser.add_argument('--densenet_theta', type=float, default=0.5)
     parser.add_argument('--conv_dropout', type=float, default=None)
 
-    parser.add_argument('--num_batches_neg_mining', type=int, default=0)
-
+    
     args = parser.parse_args()
     if args.num_evals == 0:
         args.num_evals = args.num_samples_eval / args.eval_batch_size
@@ -1703,46 +1702,6 @@ def get_pwc_learning_rate(global_step, flags):
     return learning_rate
 
 
-def create_hard_negative_batch(misclass, feed_dict, sess, few_shot_data_train, flags,
-                               images_deploy_pl, labels_deploy_pl, images_task_encode_pl, labels_task_encode_pl):
-    """
-
-    :param logits:
-    :param feed_dict:
-    :param sess:
-    :param few_shot_data_train:
-    :param flags:
-    :param images_deploy_pl:
-    :param labels_deploy_pl:
-    :param images_task_encode_pl:
-    :param labels_task_encode_pl:
-    :return:
-    """
-    feed_dict_test = dict(feed_dict)
-    misclass_test_final = 0.0
-    misclass_history = np.zeros(flags.num_batches_neg_mining)
-    for i in range(flags.num_batches_neg_mining):
-        images_deploy, labels_deploy, images_task_encode, labels_task_encode = \
-            few_shot_data_train.next_few_shot_batch(deploy_batch_size=flags.train_batch_size,
-                                                    num_classes_test=flags.num_classes_train,
-                                                    num_shots=flags.num_shots_train,
-                                                    num_tasks=flags.num_tasks_per_batch)
-
-        feed_dict_test[images_deploy_pl] = images_deploy.astype(dtype=np.float32)
-        feed_dict_test[labels_deploy_pl] = labels_deploy
-        feed_dict_test[images_task_encode_pl] = images_task_encode.astype(dtype=np.float32)
-        feed_dict_test[labels_task_encode_pl] = labels_task_encode
-
-        # logits
-        misclass_test = sess.run(misclass, feed_dict=feed_dict_test)
-        misclass_history[i] = misclass_test
-        if misclass_test > misclass_test_final:
-            misclass_test_final = misclass_test
-            feed_dict = dict(feed_dict_test)
-
-    return feed_dict
-
-
 def train(flags):
     log_dir = get_logdir_name(flags)
     flags.pretrained_model_dir = log_dir
@@ -1991,12 +1950,6 @@ def train(flags):
                         saver.save(sess, os.path.join(log_dir, 'model'), global_step=step)
                         eval(flags=flags, is_primary=False)
 
-                t_batch = time.time()
-                feed_dict = create_hard_negative_batch(misclass, feed_dict, sess, few_shot_data_train, flags,
-                                                       images_deploy_pl, labels_deploy_pl, images_task_encode_pl,
-                                                       labels_task_encode_pl)
-                dt_batch = time.time() - t_batch
-
                 t_train = time.time()
                 loss = sess.run(train_op, feed_dict=feed_dict)
                 dt_train = time.time() - t_train
@@ -2005,7 +1958,7 @@ def train(flags):
                     summary_str = sess.run(summary, feed_dict=feed_dict)
                     summary_writer.add_summary(summary_str, step)
                     summary_writer.flush()
-                    logging.info("step %d, loss : %.4g, dt: %.3gs, dt_batch: %.3gs" % (step, loss, dt_train, dt_batch))
+                    logging.info("step %d, loss : %.4g, dt: %.3gs" % (step, loss, dt_train))
 
                 if float(step-num_pretrain_steps) / flags.number_of_steps > 0.5:
                     eval_interval_steps = flags.eval_interval_fine_steps
