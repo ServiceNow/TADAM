@@ -1,6 +1,6 @@
 FROM nvidia/cuda:9.0-cudnn7-devel-ubuntu16.04
 
-MAINTAINER Thomas Boquet <thomas.boquet@hec.ca>
+MAINTAINER Boris Oreshkin <boris@elementai.com>
 
 RUN apt-get update --fix-missing && apt-get install -y wget bzip2 ca-certificates \
     libglib2.0-0 libxext6 libsm6 libxrender1 \
