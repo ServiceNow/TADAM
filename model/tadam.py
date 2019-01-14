@@ -122,8 +122,6 @@ def get_arguments():
     parser.add_argument('--num_max_pools', type=int, default=3)
     parser.add_argument('--block_size_growth', type=float, default=2.0)
     parser.add_argument('--activation', type=str, default='swish-1', choices=['relu', 'selu', 'swish-1'])
-    parser.add_argument('--feature_expansion_size', type=int, default=None)
-    parser.add_argument('--feature_bottleneck_size', type=int, default=None)
     parser.add_argument('--feature_extractor', type=str, default='simple_res_net',
                         choices=['simple_conv_net', 'simple_res_net'], help='Which feature extractor to use')
     # Feature extractor pretraining parameters (auxiliary 64-classification task)
@@ -149,8 +147,6 @@ def get_arguments():
     parser.add_argument('--cbn_num_layers', type=int, default=3)
     parser.add_argument('--cbn_per_block', type=bool, default=False)
     parser.add_argument('--cbn_per_network', type=bool, default=False)
-    parser.add_argument('--cbn_after_shortcut', type=bool, default=False)
-
     
     args = parser.parse_args()
     if args.num_evals == 0:
@@ -320,9 +316,6 @@ def build_simple_res_net(images, flags, num_filters, beta=None, gamma=None, is_t
     activation_fn = ACTIVATION_MAP[flags.activation]
     with conv2d_arg_scope:
         with tf.variable_scope(scope or 'feature_extractor', reuse=reuse):
-            # h = slim.conv2d(images, num_outputs=num_filters[0], kernel_size=6, stride=1,
-            #                 scope='conv_input', padding='SAME')
-            # h = slim.max_pool2d(h, kernel_size=2, stride=2, padding='SAME', scope='max_pool_input')
             h = images
             for i in range(len(num_filters)):
                 # make shortcut
@@ -333,36 +326,22 @@ def build_simple_res_net(images, flags, num_filters, beta=None, gamma=None, is_t
                 for j in range(flags.num_units_in_block):
                     h = slim.conv2d(h, num_outputs=num_filters[i], kernel_size=3, stride=1,
                                     scope='conv' + str(i) + '_' + str(j), padding='SAME', activation_fn=None)
-                    if beta is not None and gamma is not None and not flags.cbn_after_shortcut:
+                    if beta is not None and gamma is not None:
                         with tf.variable_scope('conditional_batch_norm'+ str(i) + '_' + str(j), reuse=reuse):
                             h = get_cbn_layer(h, beta=beta[i,j], gamma=gamma[i,j])
 
                     if j < (flags.num_units_in_block - 1) :
                         h = activation_fn(h, name='activation_' + str(i) + '_' + str(j))
                 h = h + shortcut
-                if beta is not None and gamma is not None and flags.cbn_after_shortcut:
-                    with tf.variable_scope('conditional_batch_norm' + str(i) + '_' + str(j), reuse=reuse):
-                        h = get_cbn_layer(h, beta=beta[i, j], gamma=gamma[i, j])
 
                 h = activation_fn(h, name='activation_' + str(i) + '_' + str(flags.num_units_in_block - 1))
                 if i < flags.num_max_pools:
                     h = slim.max_pool2d(h, kernel_size=2, stride=2, padding='SAME', scope='max_pool' + str(i))
-                
-
-            if flags.feature_expansion_size:
-                h = slim.conv2d(h, num_outputs=flags.feature_expansion_size, kernel_size=1, stride=1,
-                           scope='feature_expansion', padding='SAME')
 
             if flags.embedding_pooled == True:
                 kernel_size = h.shape.as_list()[-2]
                 h = slim.avg_pool2d(h, kernel_size=kernel_size, scope='avg_pool')
             h = slim.flatten(h)
-            
-            # Bottleneck layer
-            if flags.feature_bottleneck_size:
-                h = slim.fully_connected(h, num_outputs=flags.feature_bottleneck_size,
-                                         activation_fn=activation_fn, normalizer_fn = None,
-                                         scope='feature_bottleneck')
     return h
 
 

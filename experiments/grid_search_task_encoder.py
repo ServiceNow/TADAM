@@ -58,8 +58,6 @@ if __name__ == "__main__":
         feat_extract_pretrain_decay_n=20,
         feat_extract_pretrain_lr_decay_rate=10.0,  # [5.0, 10.0, 100.0]
         feat_extract_pretrain_lr_decay_n=2.0,   # 1.6 [1.6, 2.6, 3.0],
-        feature_bottleneck_size=None,
-        feature_expansion_size=None,
         num_classes_pretrain=64,
     )
 
