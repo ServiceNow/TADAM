@@ -81,49 +81,42 @@ def get_arguments():
     # Dataset parameters
     parser.add_argument('--data_dir', type=str, default=DATA_DIR, help='Path to the data.')
     parser.add_argument('--data_split', type=str, default='sources', choices=['sources', 'target_val', 'target_tst'], help='Split of the data to be used to perform operation.')
-
     # Training parameters
     parser.add_argument('--repeat', type=int, default=0)
     parser.add_argument('--number_of_steps', type=int, default=int(30000),
                         help="Number of training steps")
     parser.add_argument('--number_of_steps_to_early_stop', type=int, default=int(1000000),
                         help="Number of training steps after half way to early stop the training")
-    parser.add_argument('--log_dir', type=str, default='', help='Base log dir')
-    parser.add_argument('--exp_dir', type=str, default=None, help='experiment directory for Borgy')
+    # Few-shot configuration
     parser.add_argument('--num_classes_train', type=int, default=5, help='Number of classes in the train phase, this is coming from the prototypical networks')
     parser.add_argument('--num_shots_train', type=int, default=5, help='Number of shots in a few shot meta-train scenario')
     parser.add_argument('--train_batch_size', type=int, default=32, help='Training batch size.')
-    parser.add_argument('--pre_train_batch_size', type=int, default=64, help='Batch size to pretrain feature extractor.')
     parser.add_argument('--num_tasks_per_batch', type=int, default=2,
                         help='Number of few shot tasks per batch, so the task encoding batch is num_tasks_per_batch x num_classes_test x num_shots_train .')
-    parser.add_argument('--init_learning_rate', type=float, default=0.1, help='Initial learning rate.')
+    # Logging
+    parser.add_argument('--log_dir', type=str, default='', help='Base log dir')
+    parser.add_argument('--exp_dir', type=str, default=None, help='experiment directory for Borgy')
     parser.add_argument('--save_summaries_secs', type=int, default=60, help='Time between saving summaries')
     parser.add_argument('--save_interval_secs', type=int, default=60, help='Time between saving model?')
-    parser.add_argument('--num_classes_pretrain', type=int, default=64,
-                        help='number of classes when jointly training on the entire train dataset')
-    parser.add_argument('--optimizer', type=str, default='sgd', choices=['sgd', 'adam'])
-    parser.add_argument('--augment', type=bool, default=False)
-    # Learning rate paramteres
+    # Optimization parameters
+    parser.add_argument('--init_learning_rate', type=float, default=0.1, help='Initial learning rate.')
     parser.add_argument('--lr_anneal', type=str, default='pwc', choices=['const', 'pwc', 'exp'])
     parser.add_argument('--n_lr_decay', type=int, default=3)
     parser.add_argument('--lr_decay_rate', type=float, default=10.0)
     parser.add_argument('--num_steps_decay_pwc', type=int, default=2500, help='Decay learning rate every num_steps_decay_pwc')
-
+    parser.add_argument('--optimizer', type=str, default='sgd', choices=['sgd', 'adam'])
+    parser.add_argument('--augment', type=bool, default=False)
     parser.add_argument('--clip_gradient_norm', type=float, default=1.0, help='gradient clip norm.')
     parser.add_argument('--weights_initializer_factor', type=float, default=0.1, help='multiplier in the variance of the initialization noise.')
-    # Evaluation parameters
+    # Evaluation and test parameters
     parser.add_argument('--max_number_of_evaluations', type=float, default=float('inf'))
     parser.add_argument('--eval_interval_secs', type=int, default=120, help='Time between evaluating model?')
     parser.add_argument('--eval_interval_steps', type=int, default=1000, help='Number of train steps between evaluating model in the training loop')
     parser.add_argument('--eval_interval_fine_steps', type=int, default=250, help='Number of train steps between evaluating model in the training loop in the final phase')
-    parser.add_argument('--num_samples_eval', type=int, default=12000, help='Number of evaluation samples?')
     parser.add_argument('--eval_batch_size', type=int, default=100, help='Evaluation batch size?')
-    parser.add_argument('--num_evals', type=int, default=100, help='Number of evaluations in the evaluation phase')
-    # Test parameters
     parser.add_argument('--num_classes_test', type=int, default=5, help='Number of classes in the test phase')
     parser.add_argument('--num_shots_test', type=int, default=5, help='Number of shots in a few shot meta-test scenario')
-    parser.add_argument('--num_cases_test', type=int, default=50000,
-                        help='Number of few-shot cases to compute test accuracy')
+    parser.add_argument('--num_cases_test', type=int, default=50000, help='Number of few-shot cases to compute test accuracy')
     parser.add_argument('--pretrained_model_dir', type=str,
                         default='./logs/batch_size-32-num_tasks_per_batch-1-lr-0.122-lr_anneal-pwc-epochs-100.0-optimizer-sgd-weight_decay-0.0005-augment-False-num_filters-64-feature_extractor-simple_res_net/train',
                         help='Path to the pretrained model to run the nearest neigbor baseline test.')
@@ -138,7 +131,12 @@ def get_arguments():
     parser.add_argument('--activation', type=str, default='swish-1', choices=['relu', 'selu', 'swish-1'])
     parser.add_argument('--feature_extractor', type=str, default='simple_res_net',
                         choices=['simple_conv_net', 'simple_res_net'], help='Which feature extractor to use')
-    # Feature extractor pretraining parameters (auxiliary 64-classification task)
+    parser.add_argument('--embedding_pooled', type=bool, default=True, help='Whether to use avg pooling to create embedding')
+    parser.add_argument('--encoder_classifier_link', type=str, default='polynomial',
+                        choices=['film', 'prototypical', 'std_normalized_euc_head',
+                                 'cosine', 'polynomial', 'film_cos'],
+                        help='How to link fetaure extractors in task encoder and classifier')
+    # Auxiliary 64-classification task parameters
     parser.add_argument('--feat_extract_pretrain', type=str, default=None,
                         choices=[None, 'finetune', 'freeze', 'multitask'], help='Whether or not pretrain the feature extractor')
     parser.add_argument('--feat_extract_pretrain_offset', type=int, default=15000)
@@ -148,23 +146,20 @@ def get_arguments():
                         help='rate at which 64 way task learning rate decays')
     parser.add_argument('--feat_extract_pretrain_lr_decay_n', type=float, default=2.0,
                         help='number of times 64 way task learning rate decays')
-    parser.add_argument('--encoder_classifier_link', type=str, default='polynomial',
-                        choices=['film', 'prototypical', 'std_normalized_euc_head',
-                                 'cosine', 'polynomial', 'film_cos'],
-                        help='How to link fetaure extractors in task encoder and classifier')
-    parser.add_argument('--embedding_pooled', type=bool, default=True,
-                        help='Whether to use avg pooling to create embedding')
+    parser.add_argument('--num_classes_pretrain', type=int, default=64,
+                        help='number of classes when jointly training on the entire train dataset')
+    parser.add_argument('--pre_train_batch_size', type=int, default=64,
+                        help='Batch size to pretrain feature extractor.')
+    # Metric scaling parameters
     parser.add_argument('--metric_multiplier_init', type=float, default=1.0, help='multiplier of cosine metric')
     parser.add_argument('--metric_multiplier_trainable', type=bool, default=False, help='multiplier of cosine metric trainability')
     parser.add_argument('--polynomial_metric_order', type=int, default=1)
-
+    # Task conditioning paramters
     parser.add_argument('--film_num_layers', type=int, default=3)
     parser.add_argument('--film_per_block', type=bool, default=False)
     parser.add_argument('--film_per_network', type=bool, default=False)
     
     args = parser.parse_args()
-    if args.num_evals == 0:
-        args.num_evals = args.num_samples_eval / args.eval_batch_size
     
     print(args)
     return args
