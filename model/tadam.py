@@ -122,7 +122,7 @@ def get_arguments():
                         help='Path to the pretrained model to run the nearest neigbor baseline test.')
     # Architecture parameters
     parser.add_argument('--weight_decay', type=float, default=0.0005)
-    parser.add_argument('--weight_decay_cbn', type=float, default=0.01)
+    parser.add_argument('--weight_decay_film', type=float, default=0.01)
     parser.add_argument('--num_filters', type=int, default=64)
     parser.add_argument('--num_units_in_block', type=int, default=3)
     parser.add_argument('--num_blocks', type=int, default=4)
@@ -142,8 +142,8 @@ def get_arguments():
     parser.add_argument('--feat_extract_pretrain_lr_decay_n', type=float, default=2.0,
                         help='number of times 64 way task learning rate decays')
     parser.add_argument('--encoder_classifier_link', type=str, default='polynomial',
-                        choices=['cbn', 'prototypical', 'std_normalized_euc_head',
-                                 'cosine', 'polynomial', 'cbn_cos'],
+                        choices=['film', 'prototypical', 'std_normalized_euc_head',
+                                 'cosine', 'polynomial', 'film_cos'],
                         help='How to link fetaure extractors in task encoder and classifier')
     parser.add_argument('--embedding_pooled', type=bool, default=True,
                         help='Whether to use avg pooling to create embedding')
@@ -151,9 +151,9 @@ def get_arguments():
     parser.add_argument('--metric_multiplier_trainable', type=bool, default=False, help='multiplier of cosine metric trainability')
     parser.add_argument('--polynomial_metric_order', type=int, default=1)
 
-    parser.add_argument('--cbn_num_layers', type=int, default=3)
-    parser.add_argument('--cbn_per_block', type=bool, default=False)
-    parser.add_argument('--cbn_per_network', type=bool, default=False)
+    parser.add_argument('--film_num_layers', type=int, default=3)
+    parser.add_argument('--film_per_block', type=bool, default=False)
+    parser.add_argument('--film_per_network', type=bool, default=False)
     
     args = parser.parse_args()
     if args.num_evals == 0:
@@ -247,7 +247,7 @@ def _get_scope(is_training, flags):
     return conv2d_arg_scope
 
 
-def _get_scope_cbn(is_training, flags):
+def _get_scope_film(is_training, flags):
     normalizer_params = {
         'epsilon': 0.001,
         'momentum': .95,
@@ -292,7 +292,7 @@ def leaky_relu(x, alpha=0.1, name=None):
     return tf.maximum(x, alpha * x, name=name)
 
 
-def get_cbn_layer(h, beta, gamma):
+def get_film_layer(h, beta, gamma):
     """
 
     :param h: input layer
@@ -335,7 +335,7 @@ def build_simple_res_net(images, flags, num_filters, beta=None, gamma=None, is_t
                                     scope='conv' + str(i) + '_' + str(j), padding='SAME', activation_fn=None)
                     if beta is not None and gamma is not None:
                         with tf.variable_scope('conditional_batch_norm'+ str(i) + '_' + str(j), reuse=reuse):
-                            h = get_cbn_layer(h, beta=beta[i,j], gamma=gamma[i,j])
+                            h = get_film_layer(h, beta=beta[i,j], gamma=gamma[i,j])
 
                     if j < (flags.num_units_in_block - 1) :
                         h = activation_fn(h, name='activation_' + str(i) + '_' + str(j))
@@ -665,7 +665,7 @@ def get_nearest_neighbour_acc(flags, embeddings, labels):
     return (100.0 * num_correct) / num_tot
 
 
-def get_cbn_premultiplier(task_encoding, i, j, flags, is_training, reuse):
+def get_film_premultiplier(task_encoding, i, j, flags, is_training, reuse):
     """
 
     :param task_encoding:
@@ -678,11 +678,11 @@ def get_cbn_premultiplier(task_encoding, i, j, flags, is_training, reuse):
     """
     beta_weight = tf.get_variable(name='beta_weight' + str(i) + str(j), dtype=tf.float32, initializer=0.0,
                                   trainable=is_training,
-                                  regularizer=tf.contrib.layers.l2_regularizer(scale=flags.weight_decay_cbn,
+                                  regularizer=tf.contrib.layers.l2_regularizer(scale=flags.weight_decay_film,
                                                                                scope='penalize_beta' + str(i) + str(j)))
     gamma_weight = tf.get_variable(name='gamma_weight' + str(i) + str(j), dtype=tf.float32, initializer=0.0,
                                    trainable=is_training,
-                                   regularizer=tf.contrib.layers.l2_regularizer(scale=flags.weight_decay_cbn,
+                                   regularizer=tf.contrib.layers.l2_regularizer(scale=flags.weight_decay_film,
                                                                                 scope='penalize_gamma' + str(i) + str(
                                                                                     j)))
     tf.summary.scalar('beta_weight' + str(i) + str(j), beta_weight)
@@ -690,7 +690,7 @@ def get_cbn_premultiplier(task_encoding, i, j, flags, is_training, reuse):
     return beta_weight, gamma_weight
 
 
-def get_cbn_gamma_beta_net(h, i, j, num_filters, flags, is_training, reuse):
+def get_film_gamma_beta_net(h, i, j, num_filters, flags, is_training, reuse):
     """
 
     :param h:
@@ -704,7 +704,7 @@ def get_cbn_gamma_beta_net(h, i, j, num_filters, flags, is_training, reuse):
 
     activation_fn = ACTIVATION_MAP[flags.activation]
     beta, gamma = h, h
-    for l in range(flags.cbn_num_layers):
+    for l in range(flags.film_num_layers):
         beta_old, gamma_old = beta, gamma
         beta = slim.fully_connected(beta, num_outputs=num_filters,
                                     activation_fn=None, normalizer_fn=None, reuse=reuse,
@@ -721,18 +721,18 @@ def get_cbn_gamma_beta_net(h, i, j, num_filters, flags, is_training, reuse):
         if l > 0:
             beta = tf.add(beta, beta_old, name='shortcut_beta' + str(i) + str(j) + str(l))
             gamma = tf.add(gamma, gamma_old, name='shortcut_gamma' + str(i) + str(j) + str(l))
-        if l < flags.cbn_num_layers - 1:
+        if l < flags.film_num_layers - 1:
             beta = activation_fn(beta, name='activate_beta' + str(i) + str(j) + str(l))
             gamma = activation_fn(gamma, name='activate_gamma' + str(i) + str(j) + str(l))
 
-    beta_weight, gamma_weight = get_cbn_premultiplier(h, i, j, flags, is_training, reuse)
+    beta_weight, gamma_weight = get_film_premultiplier(h, i, j, flags, is_training, reuse)
 
-    beta = tf.multiply(beta, beta_weight, name='premultiply_cbn_beta' + str(i) + str(j))
-    gamma = tf.multiply(gamma, gamma_weight, name='premultiply_cbn_gamma' + str(i) + str(j))
+    beta = tf.multiply(beta, beta_weight, name='premultiply_film_beta' + str(i) + str(j))
+    gamma = tf.multiply(gamma, gamma_weight, name='premultiply_film_gamma' + str(i) + str(j))
     return beta, gamma
 
 
-def get_cbn_params(features_task_encode, num_filters_list, flags, reuse=False, is_training=False, scope='cbn_params_raw'):
+def get_film_params(features_task_encode, num_filters_list, flags, reuse=False, is_training=False, scope='film_params_raw'):
     """
 
     :param features_task_encode:
@@ -750,12 +750,12 @@ def get_cbn_params(features_task_encode, num_filters_list, flags, reuse=False, i
         gamma_reshape = [[None] * flags.num_units_in_block for _ in range(len(num_filters_list))]
         for i, num_filters in enumerate(num_filters_list):
             for j in range(flags.num_units_in_block):
-                if flags.cbn_per_block and j < (flags.num_units_in_block-1):
+                if flags.film_per_block and j < (flags.num_units_in_block-1):
                     beta, gamma = None, None
-                elif flags.cbn_per_network and (j < (flags.num_units_in_block-1) or i < (len(num_filters_list)-1)):
+                elif flags.film_per_network and (j < (flags.num_units_in_block-1) or i < (len(num_filters_list)-1)):
                     beta, gamma = None, None
                 else:
-                    beta, gamma = get_cbn_gamma_beta_net(h, i, j, num_filters=num_filters, flags=flags, is_training=is_training, reuse=reuse)
+                    beta, gamma = get_film_gamma_beta_net(h, i, j, num_filters=num_filters, flags=flags, is_training=is_training, reuse=reuse)
                 beta_reshape[i][j] = beta
                 gamma_reshape[i][j] = gamma
     return np.asarray(gamma_reshape), np.asarray(beta_reshape)
@@ -810,12 +810,12 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                              num_filters=num_filters,
                                                              reuse=True)
             logits = build_std_normalized_head(features_generic, task_encoding, flags, is_training=is_training)
-        elif flags.encoder_classifier_link == 'cbn':
+        elif flags.encoder_classifier_link == 'film':
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags,
                                                is_training=is_training, reuse=reuse)
             # gamma, beta = None,None
-            gamma, beta = get_cbn_params(features_task_encode=task_encoding, num_filters_list=num_filters,
+            gamma, beta = get_film_params(features_task_encode=task_encoding, num_filters_list=num_filters,
                                          is_training=is_training, flags=flags, reuse=reuse)
 
             features_task_encode = build_feature_extractor_graph(images=images_task_encode_pl, flags=flags,
@@ -834,12 +834,12 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                              scope=feature_extractor_encoding_scope,
                                                              reuse=True)
             logits = build_polynomial_head(features_generic, task_encoding, flags, is_training=is_training)
-        elif flags.encoder_classifier_link == 'cbn_cos':
+        elif flags.encoder_classifier_link == 'film_cos':
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags,
                                                is_training=is_training, reuse=reuse)
             # gamma, beta = None,None
-            gamma, beta = get_cbn_params(features_task_encode=task_encoding, num_filters_list=num_filters,
+            gamma, beta = get_film_params(features_task_encode=task_encoding, num_filters_list=num_filters,
                                          is_training=is_training, flags=flags, reuse=reuse)
 
             features_task_encode = build_feature_extractor_graph(images=images_task_encode_pl, flags=flags,
