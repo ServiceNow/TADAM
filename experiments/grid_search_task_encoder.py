@@ -48,23 +48,19 @@ if __name__ == "__main__":
         metric_multiplier_init=[0.5, 1.0, 5.0, 7.5, 10.0, 20.0], 
         metric_multiplier_trainable=False,
         polynomial_metric_order=1,  # [1, 2, 3, 4, 5],  
-        dropout=1.0,
         weights_initializer_factor=0.1,
         n_lr_decay=3,
         lr_decay_rate=10.0,
         lr_anneal='pwc',
-        fc_dropout=0.0,  # [None, 0.1, 0.2, 0.5],
         feat_extract_pretrain=['multitask', None],  # [None, 'finetune', 'freeze', 'multitask']
         feat_extract_pretrain_offset=15000,
         feat_extract_pretrain_decay_rate=0.9,  # TODO explore with more restarts [0.8, 0.9], seems like 0.8 better
         feat_extract_pretrain_decay_n=20,
         feat_extract_pretrain_lr_decay_rate=10.0,  # [5.0, 10.0, 100.0]
         feat_extract_pretrain_lr_decay_n=2.0,   # 1.6 [1.6, 2.6, 3.0],
-        feature_dropout_p=None,
         feature_bottleneck_size=None,
         feature_expansion_size=None,
         num_classes_pretrain=64,
-        conv_dropout=None,
     )
 
     parser = argparse.ArgumentParser()

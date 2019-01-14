@@ -63,7 +63,7 @@ class Namespace(object):
 def get_arguments():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--mode', type=str, default='train', choices=['train', 'eval', 'test', 'train_classifier', 'create_embedding'])
+    parser.add_argument('--mode', type=str, default='train', choices=['train', 'eval', 'test', 'train_classifier'])
     # Dataset parameters
     parser.add_argument('--data_dir', type=str, default=DATA_DIR, help='Path to the data.')
     parser.add_argument('--data_split', type=str, default='sources', choices=['sources', 'target_val', 'target_tst'], help='Split of the data to be used to perform operation.')
@@ -90,7 +90,7 @@ def get_arguments():
     parser.add_argument('--optimizer', type=str, default='sgd', choices=['sgd', 'adam'])
     parser.add_argument('--augment', type=bool, default=False)
     # Learning rate paramteres
-    parser.add_argument('--lr_anneal', type=str, default='pwc', choices=['const', 'pwc', 'cos', 'exp'])
+    parser.add_argument('--lr_anneal', type=str, default='pwc', choices=['const', 'pwc', 'exp'])
     parser.add_argument('--n_lr_decay', type=int, default=3)
     parser.add_argument('--lr_decay_rate', type=float, default=10.0)
     parser.add_argument('--num_steps_decay_pwc', type=int, default=2500, help='Decay learning rate every num_steps_decay_pwc')
@@ -111,11 +111,9 @@ def get_arguments():
     parser.add_argument('--num_cases_test', type=int, default=50000,
                         help='Number of few-shot cases to compute test accuracy')
     parser.add_argument('--pretrained_model_dir', type=str,
-                        default='./logs/batch_size-32-num_tasks_per_batch-1-lr-0.122-lr_anneal-cos-epochs-100.0-dropout-1.0-optimizer-sgd-weight_decay-0.0005-augment-False-num_filters-64-feature_extractor-simple_res_net/train',
+                        default='./logs/batch_size-32-num_tasks_per_batch-1-lr-0.122-lr_anneal-pwc-epochs-100.0-optimizer-sgd-weight_decay-0.0005-augment-False-num_filters-64-feature_extractor-simple_res_net/train',
                         help='Path to the pretrained model to run the nearest neigbor baseline test.')
     # Architecture parameters
-    parser.add_argument('--dropout', type=float, default=1.0)
-    parser.add_argument('--fc_dropout', type=float, default=None, help='Dropout before the final fully connected layer')
     parser.add_argument('--weight_decay', type=float, default=0.0005)
     parser.add_argument('--weight_decay_cbn', type=float, default=0.01)
     parser.add_argument('--num_filters', type=int, default=64)
@@ -124,7 +122,6 @@ def get_arguments():
     parser.add_argument('--num_max_pools', type=int, default=3)
     parser.add_argument('--block_size_growth', type=float, default=2.0)
     parser.add_argument('--activation', type=str, default='swish-1', choices=['relu', 'selu', 'swish-1'])
-    parser.add_argument('--feature_dropout_p', type=float, default=None)
     parser.add_argument('--feature_expansion_size', type=int, default=None)
     parser.add_argument('--feature_bottleneck_size', type=int, default=None)
     parser.add_argument('--feature_extractor', type=str, default='simple_res_net',
@@ -174,7 +171,7 @@ def get_logdir_name(flags):
     """
     
     param_list = ['batch_size', str(flags.train_batch_size), 'num_tasks', str(flags.num_tasks_per_batch), 'lr', str(flags.init_learning_rate), 'lr_anneal', flags.lr_anneal,
-                  'dropout', str(flags.dropout), 'opt', flags.optimizer,
+                  'opt', flags.optimizer,
                   'weight_decay', str(flags.weight_decay),
                   'nfilt', str(flags.num_filters), 'feature_extractor', str(flags.feature_extractor),
                   'enc_cl_link', flags.encoder_classifier_link]
@@ -244,11 +241,7 @@ def _get_scope(is_training, flags):
         weights_initializer=ScaledVarianceRandomNormal(factor=flags.weights_initializer_factor),
         biases_initializer=tf.constant_initializer(0.0)
     )
-    dropout_arg_scope = slim.arg_scope(
-        [slim.dropout],
-        keep_prob=flags.dropout,
-        is_training=is_training)
-    return conv2d_arg_scope, dropout_arg_scope
+    return conv2d_arg_scope
 
 
 def _get_scope_cbn(is_training, flags):
@@ -271,16 +264,12 @@ def _get_scope_cbn(is_training, flags):
         weights_initializer=ScaledVarianceRandomNormal(factor=flags.weights_initializer_factor),
         biases_initializer=tf.constant_initializer(0.0)
     )
-    dropout_arg_scope = slim.arg_scope(
-        [slim.dropout],
-        keep_prob=flags.dropout,
-        is_training=is_training)
-    return conv2d_arg_scope, dropout_arg_scope
+    return conv2d_arg_scope
 
 
 def build_simple_conv_net(images, flags, is_training, reuse=None, scope=None):
-    conv2d_arg_scope, dropout_arg_scope = _get_scope(is_training, flags)
-    with conv2d_arg_scope, dropout_arg_scope:
+    conv2d_arg_scope = _get_scope(is_training, flags)
+    with conv2d_arg_scope:
         with tf.variable_scope(scope or 'feature_extractor', reuse=reuse):
             h=images
             for i in range(4):
@@ -327,9 +316,9 @@ def get_cbn_layer(h, beta, gamma):
 
 
 def build_simple_res_net(images, flags, num_filters, beta=None, gamma=None, is_training=False, reuse=None, scope=None):
-    conv2d_arg_scope, dropout_arg_scope = _get_scope(is_training, flags)
+    conv2d_arg_scope = _get_scope(is_training, flags)
     activation_fn = ACTIVATION_MAP[flags.activation]
-    with conv2d_arg_scope, dropout_arg_scope:
+    with conv2d_arg_scope:
         with tf.variable_scope(scope or 'feature_extractor', reuse=reuse):
             # h = slim.conv2d(images, num_outputs=num_filters[0], kernel_size=6, stride=1,
             #                 scope='conv_input', padding='SAME')
@@ -344,8 +333,6 @@ def build_simple_res_net(images, flags, num_filters, beta=None, gamma=None, is_t
                 for j in range(flags.num_units_in_block):
                     h = slim.conv2d(h, num_outputs=num_filters[i], kernel_size=3, stride=1,
                                     scope='conv' + str(i) + '_' + str(j), padding='SAME', activation_fn=None)
-                    if flags.conv_dropout:
-                        h = slim.dropout(h, keep_prob=1.0 - flags.conv_dropout)
                     if beta is not None and gamma is not None and not flags.cbn_after_shortcut:
                         with tf.variable_scope('conditional_batch_norm'+ str(i) + '_' + str(j), reuse=reuse):
                             h = get_cbn_layer(h, beta=beta[i,j], gamma=gamma[i,j])
@@ -363,18 +350,14 @@ def build_simple_res_net(images, flags, num_filters, beta=None, gamma=None, is_t
                 
 
             if flags.feature_expansion_size:
-                if flags.feature_dropout_p:
-                    h = slim.dropout(h, scope='feature_expansion_dropout', keep_prob=1.0 - flags.feature_dropout_p)
-                h = slim.conv2d(slim.dropout(h), num_outputs=flags.feature_expansion_size, kernel_size=1, stride=1,
+                h = slim.conv2d(h, num_outputs=flags.feature_expansion_size, kernel_size=1, stride=1,
                            scope='feature_expansion', padding='SAME')
 
             if flags.embedding_pooled == True:
                 kernel_size = h.shape.as_list()[-2]
                 h = slim.avg_pool2d(h, kernel_size=kernel_size, scope='avg_pool')
             h = slim.flatten(h)
-
-            if flags.feature_dropout_p:
-                h = slim.dropout(h, scope='feature_bottleneck_dropout', keep_prob=1.0 - flags.feature_dropout_p)
+            
             # Bottleneck layer
             if flags.feature_bottleneck_size:
                 h = slim.fully_connected(h, num_outputs=flags.feature_bottleneck_size,
@@ -402,9 +385,9 @@ def build_feature_extractor_graph(images, flags, num_filters, beta=None, gamma=N
 
 
 def build_task_encoder(embeddings, labels, flags, is_training, reuse=None, scope='class_encoder'):
-    conv2d_arg_scope, dropout_arg_scope = _get_scope(is_training, flags)
+    conv2d_arg_scope = _get_scope(is_training, flags)
 
-    with conv2d_arg_scope, dropout_arg_scope:
+    with conv2d_arg_scope:
         with tf.variable_scope(scope, reuse=reuse):
             embedding_shape = embeddings.get_shape().as_list()
             task_encoding = embeddings
@@ -914,26 +897,6 @@ def build_feat_extract_pretrain_graph(images, flags, is_training):
     return logits
 
 
-def cosine_decay(learning_rate, global_step, max_step, name=None):
-    from tensorflow.python.framework import ops
-    from tensorflow.python.ops import math_ops
-    from tensorflow.python.framework import constant_op
-
-    with ops.name_scope(name, "CosineDecay",
-                        [learning_rate, global_step, max_step]) as name:
-        learning_rate = ops.convert_to_tensor(0.5 * learning_rate, name="learning_rate")
-        dtype = learning_rate.dtype
-        global_step = math_ops.cast(global_step, dtype)
-
-        const = math_ops.cast(constant_op.constant(1), learning_rate.dtype)
-
-        freq = math_ops.cast(constant_op.constant(np.pi / max_step), learning_rate.dtype)
-        osc = math_ops.cos(math_ops.multiply(freq, global_step))
-        osc = math_ops.add(osc, const)
-
-        return math_ops.multiply(osc, learning_rate, name=name)
-
-
 def get_train_datasets(flags):
     mini_imagenet = _load_mini_imagenet(data_dir=flags.data_dir, split='sources')
     few_shot_data_train = Dataset(mini_imagenet)
@@ -1034,9 +997,6 @@ def train(flags):
             learning_rate = flags.init_learning_rate
         elif flags.lr_anneal=='pwc':
             learning_rate = get_pwc_learning_rate(global_step, flags)
-        elif flags.lr_anneal=='cos':
-            learning_rate = cosine_decay(learning_rate=flags.init_learning_rate, global_step=global_step,
-                         max_step=flags.number_of_steps)
         elif flags.lr_anneal=='exp':
             lr_decay_step = flags.number_of_steps // flags.n_lr_decay
             learning_rate = tf.train.exponential_decay(flags.init_learning_rate, global_step, lr_decay_step,
