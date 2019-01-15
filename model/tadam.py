@@ -40,11 +40,10 @@ import time
 
 '''
 Execute as a script:
-go to deep-prior root and run
+go to TADAM root and run
 export PYTHONPATH=`pwd`
 export CUDA_VISIBLE_DEVICES=0
-go to deep-prior/deep_prior/experiements/mini-imagenet and run
-python nearest_neighbor.py
+python tadam.py
 '''
 
 # docker pull gcr.io/tensorflow/tensorflow:1.4.1-devel-gpu-py3
@@ -54,8 +53,6 @@ python nearest_neighbor.py
 tf.logging.set_verbosity(tf.logging.INFO)
 logging.basicConfig(level=logging.INFO)
 
-# --data_dir=/home/boris/Downloads/cifar-100-python
-# --data_dir=../../../data/mini-imagenet
 DATA_DIR = os.path.join(os.environ['DATA_PATH'], 'mini-imagenet')
 
 
@@ -122,7 +119,6 @@ def get_arguments():
                         help='Path to the pretrained model to run the nearest neigbor baseline test.')
     # Architecture parameters
     parser.add_argument('--weight_decay', type=float, default=0.0005)
-    parser.add_argument('--weight_decay_film', type=float, default=0.01)
     parser.add_argument('--num_filters', type=int, default=64)
     parser.add_argument('--num_units_in_block', type=int, default=3)
     parser.add_argument('--num_blocks', type=int, default=4)
@@ -132,9 +128,8 @@ def get_arguments():
     parser.add_argument('--feature_extractor', type=str, default='simple_res_net',
                         choices=['simple_conv_net', 'simple_res_net'], help='Which feature extractor to use')
     parser.add_argument('--embedding_pooled', type=bool, default=True, help='Whether to use avg pooling to create embedding')
-    parser.add_argument('--encoder_classifier_link', type=str, default='polynomial',
-                        choices=['film', 'prototypical', 'std_normalized_euc_head',
-                                 'cosine', 'polynomial', 'film_cos'],
+    parser.add_argument('--encoder_classifier_link', type=str, default='polynomial', choices=['film', 'prototypical',
+                        'cosine', 'polynomial', 'film_cos'],
                         help='How to link fetaure extractors in task encoder and classifier')
     # Auxiliary 64-classification task parameters
     parser.add_argument('--feat_extract_pretrain', type=str, default=None,
@@ -154,11 +149,10 @@ def get_arguments():
     parser.add_argument('--metric_multiplier_init', type=float, default=1.0, help='multiplier of cosine metric')
     parser.add_argument('--metric_multiplier_trainable', type=bool, default=False, help='multiplier of cosine metric trainability')
     parser.add_argument('--polynomial_metric_order', type=int, default=1)
-    # Task conditioning paramters
+    # Task conditioning parameters
     parser.add_argument('--film_num_layers', type=int, default=3)
-    parser.add_argument('--film_per_block', type=bool, default=False)
-    parser.add_argument('--film_per_network', type=bool, default=False)
-    
+    parser.add_argument('--weight_decay_film', type=float, default=0.01)
+
     args = parser.parse_args()
     
     print(args)
@@ -388,54 +382,6 @@ def build_task_encoder(embeddings, labels, flags, is_training, reuse=None, scope
                                            name='reshape_to_separate_tasks_task_encoding')
             task_encoding = tf.reduce_mean(task_encoding, axis=2, keep_dims=False)
             return task_encoding
-
-
-def build_std_normalized_head(features_generic, task_encoding, flags, is_training, scope='std_normalized_euc_head'):
-    """
-    Implements the head using feature normalization by std before the Euclidian distance
-    :param features_generic:
-    :param task_encoding:
-    :param flags:
-    :param is_training:
-    :param reuse:
-    :param scope:
-    :return:
-    """
-
-    with tf.variable_scope(scope):
-        _, features_generic_var = tf.nn.moments(features_generic, axes=-1, keep_dims=True)
-        _, task_encoding_var = tf.nn.moments(task_encoding, axes=-1, keep_dims=True)
-
-        features_generic = tf.div(features_generic, 1e-6 + tf.sqrt(features_generic_var, name='feature_generic_std'))
-        task_encoding = tf.div(task_encoding, 1e-6 + tf.sqrt(task_encoding_var, name='feature_generic_std'))
-
-        if len(features_generic.get_shape().as_list()) == 2:
-            features_generic = tf.expand_dims(features_generic, axis=0)
-        if len(task_encoding.get_shape().as_list()) == 2:
-            task_encoding = tf.expand_dims(task_encoding, axis=0)
-
-        # i is the number of steps in the task_encoding sequence
-        # j is the number of steps in the features_generic sequence
-        j = task_encoding.get_shape().as_list()[1]
-        i = features_generic.get_shape().as_list()[1]
-
-        # tile to be able to produce weight matrix alpha in (i,j) space
-        features_generic = tf.expand_dims(features_generic, axis=2)
-        task_encoding = tf.expand_dims(task_encoding, axis=1)
-        # features_generic changes over i and is constant over j
-        # task_encoding changes over j and is constant over i
-        task_encoding_tile = tf.tile(task_encoding, (1, i, 1, 1))
-        features_generic_tile = tf.tile(features_generic, (1, 1, j, 1))
-        # implement equation (4)
-        euclidian = -tf.norm(task_encoding_tile - features_generic_tile, name='neg_euclidian_distance', axis=-1)
-
-        if is_training:
-            euclidian = tf.reshape(euclidian, shape=(flags.num_tasks_per_batch * flags.train_batch_size, -1))
-        else:
-            euclidian_shape = euclidian.get_shape().as_list()
-            euclidian = tf.reshape(euclidian, shape=(euclidian_shape[1], -1))
-
-        return euclidian
 
 
 def get_polynomial(input, flags, is_training, scope='polynomial_metric', reuse=False):
@@ -752,12 +698,7 @@ def get_film_params(features_task_encode, num_filters_list, flags, reuse=False, 
         gamma_reshape = [[None] * flags.num_units_in_block for _ in range(len(num_filters_list))]
         for i, num_filters in enumerate(num_filters_list):
             for j in range(flags.num_units_in_block):
-                if flags.film_per_block and j < (flags.num_units_in_block-1):
-                    beta, gamma = None, None
-                elif flags.film_per_network and (j < (flags.num_units_in_block-1) or i < (len(num_filters_list)-1)):
-                    beta, gamma = None, None
-                else:
-                    beta, gamma = get_film_gamma_beta_net(h, i, j, num_filters=num_filters, flags=flags, is_training=is_training, reuse=reuse)
+                beta, gamma = get_film_gamma_beta_net(h, i, j, num_filters=num_filters, flags=flags, is_training=is_training, reuse=reuse)
                 beta_reshape[i][j] = beta
                 gamma_reshape[i][j] = gamma
     return np.asarray(gamma_reshape), np.asarray(beta_reshape)
@@ -803,15 +744,6 @@ def build_inference_graph(images_deploy_pl, images_task_encode_pl, labels_task_e
                                                              num_filters=num_filters,
                                                              reuse=True)
             logits = build_polynomial_head(features_generic, task_encoding, flags, is_training=is_training)
-        elif flags.encoder_classifier_link=='std_normalized_euc_head':
-            task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
-                                               flags=flags, is_training=is_training, reuse=reuse)
-            features_generic = build_feature_extractor_graph(images=images_deploy_pl, flags=flags,
-                                                             is_training=is_training,
-                                                             scope=feature_extractor_encoding_scope,
-                                                             num_filters=num_filters,
-                                                             reuse=True)
-            logits = build_std_normalized_head(features_generic, task_encoding, flags, is_training=is_training)
         elif flags.encoder_classifier_link == 'film':
             task_encoding = build_task_encoder(embeddings=features_task_encode, labels=labels_task_encode_pl,
                                                flags=flags,

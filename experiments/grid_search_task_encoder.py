@@ -57,9 +57,7 @@ if __name__ == "__main__":
         activation='swish-1',  # ['relu', 'selu', 'swish-1']
         encoder_classifier_link=['film', 'polynomial'],  # ['polynomial','prototypical','cosine', 'film'],
         film_num_layers=[3],
-        film_per_block=False,
-        film_per_network=False,
-        metric_multiplier_init=[0.5, 1.0, 5.0, 7.5, 10.0, 20.0], 
+        metric_multiplier_init=[0.5, 1.0, 5.0, 7.5, 10.0, 20.0],
         metric_multiplier_trainable=False,
         polynomial_metric_order=1,  # [1, 2, 3, 4, 5],  
         weights_initializer_factor=0.1,
