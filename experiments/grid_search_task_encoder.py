@@ -55,7 +55,7 @@ if __name__ == "__main__":
         number_of_steps=[30000, 60000],  # [5 * 5200, 3 * 5200],
         feature_extractor='simple_res_net',
         activation='swish-1',  # ['relu', 'selu', 'swish-1']
-        encoder_classifier_link=['film', 'polynomial'],  # ['polynomial','prototypical','cosine', 'film'],
+        metric=['film', 'polynomial'],  # ['polynomial','prototypical','cosine', 'film'],
         film_num_layers=[3],
         metric_multiplier_init=[0.5, 1.0, 5.0, 7.5, 10.0, 20.0],
         metric_multiplier_trainable=False,

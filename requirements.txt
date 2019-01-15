@@ -2,5 +2,5 @@
 ipython
 numpy
 scipy
-tensorflow==1.4.1
+tensorflow==1.8.0
 pandas
