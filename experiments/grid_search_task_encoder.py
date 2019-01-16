@@ -41,7 +41,6 @@ if __name__ == "__main__":
         num_shots_train=[5],  # [3, 5, 10],
         num_shots_test=5,
         optimizer='sgd',  # ['sgd', 'adam']
-        sqrt_noise_anneal=False,
         num_units_in_block=3,
         num_blocks=4,
         num_max_pools=[3],

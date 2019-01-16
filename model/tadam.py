@@ -112,7 +112,7 @@ def get_arguments():
     # Evaluation and test parameters
     parser.add_argument('--max_number_of_evaluations', type=float, default=float('inf'))
     parser.add_argument('--eval_interval_secs', type=int, default=120, help='Time between evaluating model?')
-    parser.add_argument('--eval_interval_steps', type=int, default=1000,
+    parser.add_argument('--eval_interval_steps', type=int, default=5000,
                         help='Number of train steps between evaluating model in the training loop')
     parser.add_argument('--eval_interval_fine_steps', type=int, default=250,
                         help='Number of train steps between evaluating model in the training loop in the final phase')
@@ -137,11 +137,11 @@ def get_arguments():
                         choices=['simple_conv_net', 'simple_res_net'], help='Which feature extractor to use')
     parser.add_argument('--embedding_pooled', type=bool, default=True,
                         help='Whether to use avg pooling to create embedding')
-    parser.add_argument('--metric', type=str, default='polynomial',
+    parser.add_argument('--metric', type=str, default='film',
                         choices=['film', 'prototypical', 'cosine', 'polynomial', 'film_cos'],
                         help='How to link embeddings in support and query sets')
     # Auxiliary 64-classification task parameters
-    parser.add_argument('--feat_extract_pretrain', type=str, default=None,
+    parser.add_argument('--feat_extract_pretrain', type=str, default='multitask',
                         choices=[None, 'finetune', 'freeze', 'multitask'],
                         help='Whether or not pretrain the feature extractor')
     parser.add_argument('--feat_extract_pretrain_offset', type=int, default=15000)
@@ -158,7 +158,7 @@ def get_arguments():
     parser.add_argument('--pre_train_batch_size', type=int, default=64,
                         help='Batch size to pretrain feature extractor.')
     # Metric scaling parameters
-    parser.add_argument('--metric_multiplier_init', type=float, default=1.0, help='multiplier of cosine metric')
+    parser.add_argument('--metric_multiplier_init', type=float, default=7.5, help='multiplier of cosine metric')
     parser.add_argument('--metric_multiplier_trainable', type=bool, default=False,
                         help='multiplier of cosine metric trainability')
     parser.add_argument('--polynomial_metric_order', type=int, default=1)
