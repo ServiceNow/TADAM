@@ -987,9 +987,9 @@ def train(flags):
                         summary_proto = tf.Summary()
                         summary_proto.ParseFromString(pretrain_summary_str)
                         summaries = {}
-                        summaries['step'] = [step]
-                        summaries['pretrain_loss'] = [pretrain_loss]
-                        summaries['dt_train'] = [dt_train]
+                        summaries['step'] = int(step)
+                        summaries['pretrain_loss'] = float(pretrain_loss)
+                        summaries['dt_train'] = float(dt_train)
                         shk_callback.send_info(0, summaries)
                         summary_writer.add_summary(pretrain_summary_str, step)
                         summary_writer.flush()
@@ -1009,9 +1009,9 @@ def train(flags):
                 if step % 100 == 0:
                     summary_str = sess.run(summary, feed_dict=feed_dict)
                     summaries = {}
-                    summaries["step"] = [step]
-                    summaries["loss"] = [loss]
-                    summaries["dt_train"] = [dt_train]
+                    summaries["step"] = int(step)
+                    summaries["loss"] = float(loss)
+                    summaries["dt_train"] = float(dt_train)
                     shk_callback.send_info(0, summaries)
 
                     summary_writer.add_summary(summary_str, step)
@@ -1102,9 +1102,9 @@ def train_classifier(flags):
                     pretrain_summary_str = sess.run(pretrain_summary, feed_dict=feed_dict)
                     summary_writer.add_summary(pretrain_summary_str, step)
                     summary_writer.flush()
-                    summaries["step"] = [step]
-                    summaries["pretrain_loss"] = [pretrain_loss]
-                    summaries["dt_train"] = [dt_train]
+                    summaries["step"] = int(step)
+                    summaries["pretrain_loss"] = float(pretrain_loss)
+                    summaries["dt_train"] = float(dt_train)
                     logging.info("step %d, pretrain loss : %.4g, dt: %.3gs" % (step, pretrain_loss, dt_train))
                     shk_callback.send_info(0, summaries)
 
@@ -1295,11 +1295,20 @@ def eval(flags):
             results["loss_target_val"] = loss_val
             results["loss_sources"] = loss_trn
 
+            results_shk = dict()
+            results_shk["accuracy_target_tst"] = float(acc_tst)
+            results_shk["accuracy_target_val"] = float(acc_val)
+            results_shk["accuracy_sources"] = float(acc_trn)
+
+            results_shk["loss_target_tst"] = float(loss_tst)
+            results_shk["loss_target_val"] = float(loss_val)
+            results_shk["loss_sources"] = float(loss_trn)
+
             last_step = model.step
             eval_writer(model.step, **results)
             logging.info("accuracy_%s: %.3g, accuracy_%s: %.3g, accuracy_%s: %.3g."
                          % ("target_tst", acc_tst, "target_val", acc_val, "sources", acc_trn))
-            shk_callback.send_info(0, results)
+            shk_callback.send_info(0, results_shk)
         if flags.eval_interval_secs > 0:
             time.sleep(flags.eval_interval_secs)
         i = i + 1
@@ -1318,8 +1327,12 @@ def eval_pretrain(flags, data_set_train, data_set_test):
     results["pretrain/accuracy_test"] = acc_tst
     results["pretrain/accuracy_train"] = acc_trn
 
+    results_shk = {}
+    results_shk["pretrain/accuracy_test"] = float(acc_tst)
+    results_shk["pretrain/accuracy_train"] = float(acc_trn)
+
     shk_callback = ShurikenMonitor()
-    shk_callback.send_info(0, results)
+    shk_callback.send_info(0, results_shk)
     eval_writer(model.step, **results)
     logging.info("pretrain_accuracy_%s: %.3g, pretrain_accuracy_%s: %.3g." % ("test", acc_tst, "train", acc_trn))
 
