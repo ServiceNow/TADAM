@@ -1,0 +1,24 @@
+{
+    "title": "TADAM test",
+    "worker_config": {
+        "memory": 16,
+        "cpu": 3,
+        "gpu": 1,
+        "volumes": [
+            "/mnt/datasets/public/:/mnt/datasets/public/",
+            "/mnt/home/thomas/:/mnt/home/thomas"
+        ],
+        "environmentVars": {"DATA_PATH": "/mnt/dataset/public"}
+    },
+    "parameters": {
+        "name": "RandomSearch",
+        "config": {
+            "dimensions": {
+                "train_batch_size": "randint(16, 128)",
+                "pre_train_batch_size": "randint(32, 128)",
+                "num_units_in_block": "randint(2, 4)",
+                "num_filters": "randint(32, 128)"
+            }
+        }
+    }
+}
