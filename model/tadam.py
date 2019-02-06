@@ -37,6 +37,10 @@ import logging
 from common.util import summary_writer
 from common.gen_experiments import load_and_save_params
 import time
+# import Shuriken utilities
+from shuriken.callbacks import ShurikenMonitor
+from shuriken.utils import get_hparams
+
 
 '''
 Execute as a script:
@@ -189,10 +193,13 @@ def get_logdir_name(flags):
                   'nfilt', str(flags.num_filters), 'feature_extractor', str(flags.feature_extractor),
                   'metric', flags.metric]
 
+    trial_id = os.environ.get("SHK_TRIAL_ID")
+    if trial_id is None:
+        trial_id = "local"
     if flags.log_dir == '':
-        logdir = './logs1/' + '-'.join(param_list)
+        raise ValueError("You should pass a path to the logs")
     else:
-        logdir = os.path.join(flags.log_dir, '-'.join(param_list))
+        logdir = os.path.join(flags.log_dir, trial_id, '-'.join(param_list))
 
     if flags.exp_dir is not None:
         # Running a Borgy experiment
@@ -930,6 +937,7 @@ def train(flags):
                                          saver=saver, global_step=global_step,
                                          save_summaries_secs=flags.save_summaries_secs, save_model_secs=0)
 
+        shk_callback = ShurikenMonitor()
         with supervisor.managed_session() as sess:
             checkpoint_step = sess.run(global_step)
             if checkpoint_step > 0:
@@ -976,6 +984,13 @@ def train(flags):
 
                     if step % 100 == 0:
                         pretrain_summary_str = sess.run(pretrain_summary, feed_dict=pretrain_feed_dict)
+                        summary_proto = tf.Summary()
+                        summary_proto.ParseFromString(pretrain_summary_str)
+                        summaries = {}
+                        summaries['step'] = [step]
+                        summaries['pretrain_loss'] = [pretrain_loss]
+                        summaries['dt_train'] = [dt_train]
+                        shk_callback.send_info(0, summaries)
                         summary_writer.add_summary(pretrain_summary_str, step)
                         summary_writer.flush()
                         logging.info("step %d, pretrain loss : %.4g, dt: %.3gs" % (step, pretrain_loss, dt_train))
@@ -993,6 +1008,12 @@ def train(flags):
 
                 if step % 100 == 0:
                     summary_str = sess.run(summary, feed_dict=feed_dict)
+                    summaries = {}
+                    summaries["step"] = [step]
+                    summaries["loss"] = [loss]
+                    summaries["dt_train"] = [dt_train]
+                    shk_callback.send_info(0, summaries)
+
                     summary_writer.add_summary(summary_str, step)
                     summary_writer.flush()
                     logging.info("step %d, loss : %.4g, dt: %.3gs" % (step, loss, dt_train))
@@ -1064,7 +1085,7 @@ def train_classifier(flags):
                                          saver=saver,
                                          global_step=global_step, save_summaries_secs=flags.save_summaries_secs,
                                          save_model_secs=0)  # flags.save_interval_secs
-
+        shk_callback = ShurikenMonitor()
         with supervisor.managed_session() as sess:
             checkpoint_step = sess.run(global_step)
             for step in range(checkpoint_step, flags.number_of_steps):
@@ -1077,10 +1098,15 @@ def train_classifier(flags):
                 dt_train = time.time() - t_train
 
                 if step % 100 == 0:
+                    summaries = dict()
                     pretrain_summary_str = sess.run(pretrain_summary, feed_dict=feed_dict)
                     summary_writer.add_summary(pretrain_summary_str, step)
                     summary_writer.flush()
+                    summaries["step"] = [step]
+                    summaries["pretrain_loss"] = [pretrain_loss]
+                    summaries["dt_train"] = [dt_train]
                     logging.info("step %d, pretrain loss : %.4g, dt: %.3gs" % (step, pretrain_loss, dt_train))
+                    shk_callback.send_info(0, summaries)
 
                 if step % 500 == 0:
                     saver.save(sess, os.path.join(log_dir, 'model'), global_step=step)
@@ -1246,6 +1272,7 @@ def eval(flags):
     eval_writer = summary_writer(log_dir + '/eval')
     i = 0
     last_step = -1
+    shk_callback = ShurikenMonitor()
     while i < flags.max_number_of_evaluations:
         latest_checkpoint = tf.train.latest_checkpoint(checkpoint_dir=flags.pretrained_model_dir)
         model_step = int(os.path.basename(latest_checkpoint or '0-0').split('-')[1])
@@ -1272,6 +1299,7 @@ def eval(flags):
             eval_writer(model.step, **results)
             logging.info("accuracy_%s: %.3g, accuracy_%s: %.3g, accuracy_%s: %.3g."
                          % ("target_tst", acc_tst, "target_val", acc_val, "sources", acc_trn))
+            shk_callback.send_info(0, results)
         if flags.eval_interval_secs > 0:
             time.sleep(flags.eval_interval_secs)
         i = i + 1
@@ -1290,6 +1318,8 @@ def eval_pretrain(flags, data_set_train, data_set_test):
     results["pretrain/accuracy_test"] = acc_tst
     results["pretrain/accuracy_train"] = acc_trn
 
+    shk_callback = ShurikenMonitor()
+    shk_callback.send_info(0, results)
     eval_writer(model.step, **results)
     logging.info("pretrain_accuracy_%s: %.3g, pretrain_accuracy_%s: %.3g." % ("test", acc_tst, "train", acc_trn))
 
@@ -1319,13 +1349,22 @@ def image_augment(images):
 
 def main(argv=None):
     config = tf.ConfigProto(allow_soft_placement=True)
-    config.gpu_options.per_process_gpu_memory_fraction = 1.0
+    config.gpu_options.per_process_gpu_memory_fraction = 3.0
     config.gpu_options.allow_growth = True
     sess = tf.Session(config=config)
 
     print(os.getcwd())
 
     default_params = get_arguments()
+
+    d_params = vars(default_params)
+
+    # get the hyperparameters from the services
+    # returns a dict of hyperparams
+    hparams = get_hparams()
+    d_params.update(hparams)
+
+
     log_dir = get_logdir_name(flags=default_params)
 
     pathlib.Path(log_dir).mkdir(parents=True, exist_ok=True)
