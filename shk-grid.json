@@ -1,5 +1,5 @@
 {
-    "title": "TADAM analysis",
+    "title": "TADAM grid",
     "worker_config": {
         "memory": 16,
         "cpu": 3,

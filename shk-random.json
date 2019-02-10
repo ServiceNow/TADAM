@@ -1,5 +1,5 @@
 {
-    "title": "TADAM test",
+    "title": "TADAM Random",
     "worker_config": {
         "memory": 16,
         "cpu": 3,
