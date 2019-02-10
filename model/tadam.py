@@ -984,8 +984,6 @@ def train(flags):
 
                     if step % 100 == 0:
                         pretrain_summary_str = sess.run(pretrain_summary, feed_dict=pretrain_feed_dict)
-                        summary_proto = tf.Summary()
-                        summary_proto.ParseFromString(pretrain_summary_str)
                         summaries = {}
                         summaries['step'] = int(step)
                         summaries['pretrain_loss'] = float(pretrain_loss)
