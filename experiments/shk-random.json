@@ -1,0 +1,24 @@
+{
+    "title": "TADAM Random",
+    "worker_config": {
+        "memory": 16,
+        "cpu": 3,
+        "gpu": 1,
+        "command": ["python3", "-m", "model.tadam", "--log_dir=/logs", "--number_of_steps=10000"],
+        "volumes": [
+            "/mnt/datasets/public/:/data",
+            "/mnt/home/thomas/logs/tadam:/logs"
+        ]
+    },
+    "parameters": {
+        "name": "RandomSearch",
+        "config": {
+            "dimensions": {
+                "train_batch_size": "randint(16, 128)",
+                "pre_train_batch_size": "randint(32, 128)",
+                "num_units_in_block": "randint(2, 4)",
+                "num_filters": "randint(32, 128)"
+            }
+        }
+    }
+}

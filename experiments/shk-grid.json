@@ -1,0 +1,23 @@
+{
+    "title": "TADAM grid",
+    "worker_config": {
+        "memory": 16,
+        "cpu": 3,
+        "gpu": 1,
+        "command": ["python3", "-m", "model.tadam"],
+        "volumes": ["/mnt/datasets/public/:/data", "/mnt/home/thomas/logs/tadam/:/logs"]
+    },
+    "parameters": {
+        "name": "GridSearch",
+        "config": {
+            "dimensions": {
+                "train_batch_size": [32, 48, 64],
+                "pre_train_batch_size": [32, 48, 64],
+                "num_units_in_block": [2, 3, 4],
+                "num_filters": [32, 48, 64],
+                "log_dir": ["/logs"],
+                "number_of_steps": [10000]
+            }
+        }
+    }
+}
