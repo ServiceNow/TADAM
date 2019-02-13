@@ -37,9 +37,15 @@ import logging
 from common.util import summary_writer
 from common.gen_experiments import load_and_save_params
 import time
+import warnings
 # import Shuriken utilities
-from shuriken.callbacks import ShurikenMonitor
-from shuriken.utils import get_hparams
+try:
+    from shuriken.callbacks import ShurikenMonitor
+    from shuriken.utils import get_hparams
+except ImportError:
+    warnings.warn("Shuriken note available, mocking the utility functions")
+    from shurimock import ShurikenMonitor
+    from shurimock import get_hparams
 
 
 '''
@@ -1373,8 +1379,9 @@ def main(argv=None):
     # get the hyperparameters from the services
     # returns a dict of hyperparams
     hparams = get_hparams()
+    if 'n_iterations' in hparams:
+        hparams['number_of_steps'] = hparams['n_iterations'] * 100
     d_params.update(hparams)
-
 
     log_dir = get_logdir_name(flags=default_params)
 
