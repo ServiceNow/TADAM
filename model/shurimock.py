@@ -4,4 +4,4 @@ class ShurikenMonitor(object):
 
 
 def get_hparams():
-    pass
+    return dict()

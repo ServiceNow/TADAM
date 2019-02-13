@@ -44,8 +44,8 @@ try:
     from shuriken.utils import get_hparams
 except ImportError:
     warnings.warn("Shuriken note available, mocking the utility functions")
-    from shurimock import ShurikenMonitor
-    from shurimock import get_hparams
+    from model.shurimock import ShurikenMonitor
+    from model.shurimock import get_hparams
 
 
 '''
