@@ -1,0 +1,34 @@
+{
+    "title": "TADAM Random Seeded Test",
+    "worker_config": {
+        "memory": 8,
+        "cpu": 2,
+        "gpu": 1,
+        "command": ["python3", "-m", "model.tadam", "--log_dir=/logs", "--number_of_steps=5000"],
+        "volumes": [
+            "/mnt/datasets/public/:/data",
+            "/mnt/home/thomas/logs/tadam:/logs"
+        ]
+    },
+    "parameters": {
+        "name": "RandomSeed",
+        "config": {
+            "strategy": {
+                "name": "RandomSearch",
+                "config": {
+                    "dimensions": {
+                        "train_batch_size": "randint(16, 64)",
+                        "pre_train_batch_size": "randint(32, 64)",
+                        "num_units_in_block": "randint(2, 5)",
+                        "num_filters": "randint(32, 128)",
+                        "init_learning_rate": "norm(0.1, 0.02)",
+                        "lr_decay_rate": "norm(10, 1)"
+                    },
+                    "nb_trials": 2
+                }
+            },
+            "random_seeds": [56789, 98765],
+            "repeat": 2
+        }
+    }
+}

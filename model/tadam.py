@@ -174,11 +174,10 @@ def get_arguments():
     parser.add_argument('--polynomial_metric_order', type=int, default=1)
     # Task conditioning parameters
     parser.add_argument('--film_num_layers', type=int, default=3)
+    parser.add_argument('--random_seed', type=int, default=1337)
     parser.add_argument('--weight_decay_film', type=float, default=0.01)
 
     args = parser.parse_args()
-
-    print(args)
     return args
 
 
@@ -844,6 +843,8 @@ def train(flags):
     image_size = get_image_size(flags.data_dir)
 
     with tf.Graph().as_default():
+        tf.random.set_random_seed(flags.random_seed)
+        np.random.seed(flags.random_seed)
         global_step = tf.Variable(0, trainable=False, name='global_step', dtype=tf.int64)
         global_step_pretrain = tf.Variable(0, trainable=False, name='global_step_pretrain', dtype=tf.int64)
 
@@ -1043,6 +1044,8 @@ def train_classifier(flags):
     image_size = get_image_size(flags.data_dir)
 
     with tf.Graph().as_default():
+        tf.random.set_random_seed(flags.random_seed)
+        np.random.seed(flags.random_seed)
         global_step = tf.Variable(0, trainable=False, name='global_step', dtype=tf.int64)
 
         # 64-way classification task oprations
@@ -1382,6 +1385,12 @@ def main(argv=None):
     if 'n_iterations' in hparams:
         hparams['number_of_steps'] = hparams['n_iterations'] * 100
     d_params.update(hparams)
+
+    if 'random_seed' in hparams:
+        tf.random.set_random_seed(hparams['random_seed'])
+        np.random.seed(hparams['random_seed'])
+
+    print(d_params)
 
     log_dir = get_logdir_name(flags=default_params)
 
