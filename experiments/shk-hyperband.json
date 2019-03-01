@@ -1,0 +1,37 @@
+{
+    "title": "TADAM grid",
+    "worker_config": {
+        "memory": 16,
+        "cpu": 2,
+        "gpu": 1,
+        "command": ["python3", "-m", "model.tadam", "--log_dir=/logs"],
+        "volumes": ["/mnt/datasets/public/:/data", "/mnt/home/thomas/logs/tadam/:/logs"]
+    },
+    "parameters": {
+        "name": "Hyperband",
+        "config": {
+            "eta": 2,
+            "metric": "loss_target_tst",
+            "n_workers": 20,
+            "max_iter": 100,
+            "min_iter": 10,
+            "limit": 0.75,
+            "strategy": {
+                "name": "BayesSearch",
+                "config": {
+                    "acq_optimizer": "auto",
+                    "acq_optimizer_kwargs": {},
+                    "base_estimator": "gp",
+                    "n_initial_points": 80,
+                    "acq_func_kwargs": null,
+                    "dimensions": {
+                        "train_batch_size": [32, 72],
+                        "pre_train_batch_size": [32, 72],
+                        "num_units_in_block": [2, 4],
+                        "num_filters": [32, 72]
+                    }
+                }
+            }
+        }
+    }
+}
