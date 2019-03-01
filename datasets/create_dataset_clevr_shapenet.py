@@ -73,6 +73,7 @@ class ClevrShapenet(Dataset):
 
 def main(data_dir, output_dir):
     setnames = ["test", "train", "valid"]
+    setname_map = {"test": "test", "train": "train", "valid": "val"}
     for setname in setnames:
         print("Loading original CLEVR-SHAPENET dataset, split %s, from %s" %(setname, data_dir))
         clevr_dataset = ClevrShapenet(path=data_dir, setname=setname, size=84)
@@ -81,7 +82,7 @@ def main(data_dir, output_dir):
         features=[]
         targets=[]
         for image, label in tqdm(clevr_dataset):
-            features.append(np.array(image))
+            features.append(np.expand_dims(np.array(image), 0))
             targets.append(label)
 
         features = np.concatenate(features)
@@ -89,7 +90,7 @@ def main(data_dir, output_dir):
 
         print("Saving few-shot data to disc", output_dir)
         pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
-        np.savez(os.path.join(output_dir, 'few-shot-{}.npz'.format(setname)), features=features, targets=targets)
+        np.savez(os.path.join(output_dir, 'few-shot-{}.npz'.format(setname_map[setname])), features=features, targets=targets)
 
 
 if __name__ == '__main__':
