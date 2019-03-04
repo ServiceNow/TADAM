@@ -61,6 +61,8 @@ def get_image_size(data_dir):
         image_size = 84
     elif 'cifar' in data_dir:
         image_size = 32
+    elif 'clevr-shapenet' in data_dir:
+        image_size = 84
     else:
         raise Exception('Unknown dataset: %s' % data_dir)
     return image_size
