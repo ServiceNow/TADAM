@@ -27,13 +27,27 @@ os.environ['LANG'] = 'en_CA.UTF-8'
 
 if __name__ == "__main__":
     exp_description = "clevr_proto_vs_tadam_5shot"
-
+    # This is the 5-way 5-sot configuration
     params = dict(
         repeat=list(range(0, 3)),  # used to repeate the same experiment
         data_dir='/mnt/scratch/serdyuk/data/clevr-shapenet/1',
         metric=['film', 'prototypical'],
         feat_extract_pretrain=['multitask', None],
         number_of_steps=[120000],
+    )
+    
+    exp_description = "clevr_proto_vs_tadam_1shot"
+    # This is the 5-way 1-sot configuration
+    params = dict(
+        num_shots_train=1,
+        num_shots_test=1,
+        train_batch_size=5,
+        num_tasks_per_batch=12,
+        repeat=list(range(0, 3)),  # used to repeate the same experiment
+        data_dir='/mnt/scratch/serdyuk/data/clevr-shapenet/1',
+        metric=['film', 'prototypical'],
+        feat_extract_pretrain=['multitask', None],
+        number_of_steps=[60000, 120000],
     )
 
     parser = argparse.ArgumentParser()
